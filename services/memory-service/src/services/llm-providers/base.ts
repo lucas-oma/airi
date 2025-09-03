@@ -5,10 +5,10 @@ export interface LLMProvider {
   /**
    * Process a batch of messages and return structured memory data
    */
-  processBatch(batch: ProcessingBatch): Promise<StructuredLLMResponse>
-  
+  processBatch: (batch: ProcessingBatch) => Promise<StructuredLLMResponse>
+
   /**
    * Get provider name for logging/debugging
    */
-  getProviderName(): string
-} 
+  getProviderName: () => string
+}

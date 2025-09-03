@@ -3,7 +3,7 @@ services:
   airi-memory-pgvector:
     image: ghcr.io/tensorchord/pgvecto-rs:pg17-v0.4.0
     ports:
-      - "5434:5432"
+      - '5434:5432'
     environment:
       POSTGRES_DATABASE: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -18,11 +18,11 @@ services:
 
   # Memory Service API
   airi-memory-service:
-    build: 
+    build:
       context: ../..
       dockerfile: services/memory-service/Dockerfile
     ports:
-      - "${PORT}:${PORT}"
+      - '${PORT}:${PORT}'
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - PORT=${PORT}

@@ -1,6 +1,6 @@
 /**
  * Memory Service Business Logic
- * 
+ *
  * This file implements:
  * - Memory CRUD operations
  * - Vector similarity search
@@ -9,10 +9,12 @@
  * - Session management
  */
 
-import { useDrizzle } from '../db/index.js'
-import { chatMessagesTable, chatCompletionsHistoryTable } from '../db/schema.js'
+import type { MessageIngestionService } from './message-processing.js'
+
 import { eq } from 'drizzle-orm'
-import { MessageIngestionService } from './message-processing.js'
+
+import { useDrizzle } from '../db/index.js'
+import { chatMessagesTable } from '../db/schema.js'
 
 export interface IngestMessageRequest {
   content: string
@@ -71,8 +73,8 @@ export class MemoryService {
       // TODO: Generate embeddings for the content
       // For now, we'll store without embeddings
       const embedding_1536 = null // TODO: Generate embedding
-      const embedding_1024 = null // TODO: Generate embedding  
-      const embedding_768 = null  // TODO: Generate embedding
+      const embedding_1024 = null // TODO: Generate embedding
+      const embedding_768 = null // TODO: Generate embedding
 
       // Insert the message into chatMessagesTable
       const [result] = await this.db.insert(chatMessagesTable).values({
@@ -90,17 +92,18 @@ export class MemoryService {
         platform: chatMessagesTable.platform,
         created_at: chatMessagesTable.created_at,
       })
-      
+
       // Mark message for processing
-      await this.messageIngestion.markMessageForProcessing(result.id, result.content)
-      
+      await this.messageIngestion.markMessageForProcessing(result.id)
+
       return {
         id: result.id,
         content: result.content,
         platform: result.platform,
         created_at: result.created_at,
       }
-    } catch (error) {
+    }
+    catch (error) {
       console.error('Failed to create memory:', error)
       throw new Error(`Failed to create memory: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
@@ -121,7 +124,8 @@ export class MemoryService {
         .from(chatMessagesTable)
         .where(eq(chatMessagesTable.id, id))
 
-      if (!result) return null
+      if (!result)
+        return null
 
       return {
         id: result.id,
@@ -129,7 +133,8 @@ export class MemoryService {
         platform: result.platform,
         created_at: result.created_at,
       }
-    } catch (error) {
+    }
+    catch (error) {
       console.error('Failed to get message:', error)
       throw new Error(`Failed to get message: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
@@ -142,7 +147,7 @@ export class MemoryService {
     try {
       // Import the completions table schema
       const { chatCompletionsHistoryTable } = await import('../db/schema.js')
-      
+
       // Insert the completion into chatCompletionsHistoryTable
       const [result] = await this.db.insert(chatCompletionsHistoryTable).values({
         prompt: data.prompt,
@@ -164,7 +169,8 @@ export class MemoryService {
         platform: data.platform, // Store platform in our response
         created_at: result.created_at,
       }
-    } catch (error) {
+    }
+    catch (error) {
       console.error('Failed to store completion:', error)
       throw new Error(`Failed to store completion: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
@@ -183,4 +189,4 @@ export class MemoryService {
   //   // For now, return empty array
   //   return []
   // }
-} 
+}

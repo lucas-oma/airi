@@ -1,7 +1,8 @@
-import OpenAI from 'openai'
-import type { LLMProvider } from './base.js'
 import type { ProcessingBatch } from '../background-trigger.js'
 import type { StructuredLLMResponse } from '../llm-memory-manager.js'
+import type { LLMProvider } from './base.js'
+
+import OpenAI from 'openai'
 
 export class OpenAIProvider implements LLMProvider {
   private client: OpenAI
@@ -19,7 +20,7 @@ export class OpenAIProvider implements LLMProvider {
   async processBatch(batch: ProcessingBatch): Promise<StructuredLLMResponse> {
     const messages = batch.messages.map(msg => ({
       role: 'user' as const,
-      content: msg.content
+      content: msg.content,
     }))
 
     const systemPrompt = `You are an AI memory manager. Analyze the following messages and extract structured information.
@@ -72,11 +73,11 @@ Analyze the semantic meaning, not just keywords.`
         model: this.model,
         messages: [
           { role: 'system', content: systemPrompt },
-          ...messages
+          ...messages,
         ],
         response_format: { type: 'json_object' },
         temperature: 0.3, // Lower temperature for more consistent structured output
-        max_tokens: 2000
+        max_tokens: 2000,
       })
 
       const content = response.choices[0]?.message?.content
@@ -85,12 +86,13 @@ Analyze the semantic meaning, not just keywords.`
       }
 
       const parsed = JSON.parse(content) as StructuredLLMResponse
-      
+
       // Validate the response structure
       this.validateResponse(parsed)
-      
+
       return parsed
-    } catch (error) {
+    }
+    catch (error) {
       console.error('OpenAI API error:', error)
       throw new Error(`OpenAI processing failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
@@ -107,4 +109,4 @@ Analyze the semantic meaning, not just keywords.`
       throw new Error('Invalid response: missing or invalid ideas')
     }
   }
-} 
+}

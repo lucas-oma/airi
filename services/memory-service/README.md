@@ -36,7 +36,6 @@ Create a `.env` file with:
 POSTGRES_PORT=5434
 POSTGRES_PASSWORD=airi_password
 
-
 # API Keys (at least one is required)
 OPENAI_API_KEY=your_openai_api_key_here
 GOOGLE_AI_API_KEY=your_google_ai_api_key_here
@@ -114,12 +113,12 @@ Response:
 SELECT COUNT(*) FROM chat_messages WHERE is_processed = false;
 
 -- Check processing status
-SELECT 
+SELECT
   is_processed,
   COUNT(*) as count,
   MIN(created_at) as oldest,
   MAX(created_at) as newest
-FROM chat_messages 
+FROM chat_messages
 GROUP BY is_processed;
 ```
 

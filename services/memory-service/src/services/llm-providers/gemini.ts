@@ -1,7 +1,8 @@
-import { GoogleGenerativeAI } from '@google/generative-ai'
-import type { LLMProvider } from './base.js'
 import type { ProcessingBatch } from '../background-trigger.js'
 import type { StructuredLLMResponse } from '../llm-memory-manager.js'
+import type { LLMProvider } from './base.js'
+
+import { GoogleGenerativeAI } from '@google/generative-ai'
 
 export class GeminiProvider implements LLMProvider {
   private genAI: GoogleGenerativeAI
@@ -83,12 +84,13 @@ Analyze the semantic meaning, not just keywords.`
       }
 
       const parsed = JSON.parse(jsonMatch[0]) as StructuredLLMResponse
-      
+
       // Validate the response structure
       this.validateResponse(parsed)
-      
+
       return parsed
-    } catch (error) {
+    }
+    catch (error) {
       console.error('Gemini API error:', error)
       throw new Error(`Gemini processing failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
@@ -105,4 +107,4 @@ Analyze the semantic meaning, not just keywords.`
       throw new Error('Invalid response: missing or invalid ideas')
     }
   }
-} 
+}

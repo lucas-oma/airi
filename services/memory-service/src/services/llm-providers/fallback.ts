@@ -1,6 +1,6 @@
-import type { LLMProvider } from './base.js'
 import type { ProcessingBatch } from '../background-trigger.js'
 import type { StructuredLLMResponse } from '../llm-memory-manager.js'
+import type { LLMProvider } from './base.js'
 
 export class FallbackProvider implements LLMProvider {
   getProviderName(): string {
@@ -8,15 +8,15 @@ export class FallbackProvider implements LLMProvider {
   }
 
   async processBatch(batch: ProcessingBatch): Promise<StructuredLLMResponse> {
-    console.log('Using fallback provider - no LLM configured')
-    
+    console.warn('Using fallback provider - no LLM configured')
+
     const memoryFragments: StructuredLLMResponse['memoryFragments'] = []
     const goals: StructuredLLMResponse['goals'] = []
     const ideas: StructuredLLMResponse['ideas'] = []
 
     for (const message of batch.messages) {
       const content = message.content.toLowerCase()
-      
+
       // Create memory fragment
       memoryFragments.push({
         content: message.content,
@@ -24,7 +24,7 @@ export class FallbackProvider implements LLMProvider {
         category: this.determineCategory(content),
         importance: this.determineImportance(content),
         emotionalImpact: this.determineEmotionalImpact(content),
-        tags: this.generateTags(content)
+        tags: this.generateTags(content),
       })
 
       // Extract goals
@@ -33,7 +33,7 @@ export class FallbackProvider implements LLMProvider {
           title: `Goal: ${message.content.substring(0, 50)}...`,
           description: message.content,
           priority: 7,
-          category: 'personal'
+          category: 'personal',
         })
       }
 
@@ -43,7 +43,7 @@ export class FallbackProvider implements LLMProvider {
           content: message.content,
           sourceType: 'conversation',
           excitement: 6,
-          status: 'new'
+          status: 'new',
         })
       }
     }
@@ -111,14 +111,22 @@ export class FallbackProvider implements LLMProvider {
 
   private generateTags(content: string): string[] {
     const tags: string[] = []
-    if (content.includes('work')) tags.push('work')
-    if (content.includes('personal')) tags.push('personal')
-    if (content.includes('urgent')) tags.push('urgent')
-    if (content.includes('idea')) tags.push('idea')
-    if (content.includes('goal')) tags.push('goal')
-    if (content.includes('project')) tags.push('project')
-    if (content.includes('family')) tags.push('family')
-    if (content.includes('friend')) tags.push('friend')
+    if (content.includes('work'))
+      tags.push('work')
+    if (content.includes('personal'))
+      tags.push('personal')
+    if (content.includes('urgent'))
+      tags.push('urgent')
+    if (content.includes('idea'))
+      tags.push('idea')
+    if (content.includes('goal'))
+      tags.push('goal')
+    if (content.includes('project'))
+      tags.push('project')
+    if (content.includes('family'))
+      tags.push('family')
+    if (content.includes('friend'))
+      tags.push('friend')
     return tags
   }
-} 
+}

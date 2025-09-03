@@ -19,7 +19,7 @@ LLM_API_KEY=your_api_key     # API key for your chosen provider
 - **Provider**: `LLM_PROVIDER=openai`
 - **Default Model**: `gpt-4-turbo-preview`
 - **API Key**: Required from [OpenAI Platform](https://platform.openai.com/)
-- **Features**: 
+- **Features**:
   - Structured JSON output with `response_format: "json_object"`
   - High-quality reasoning
   - Consistent performance
@@ -120,4 +120,4 @@ curl -X POST http://localhost:3001/api/messages \
   -d '{"content": "I have an important work goal to finish the project by next week", "platform": "test"}'
 ```
 
-Check the logs to see which provider is being used and if the LLM processing is working correctly. 
+Check the logs to see which provider is being used and if the LLM processing is working correctly.

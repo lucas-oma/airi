@@ -1,16 +1,16 @@
 import type { LLMProvider } from './base.js'
-import { OpenAIProvider } from './openai.js'
-import { GeminiProvider } from './gemini.js'
+
+import { env } from 'node:process'
+
 import { FallbackProvider } from './fallback.js'
+import { GeminiProvider } from './gemini.js'
+import { OpenAIProvider } from './openai.js'
 
 export class LLMProviderFactory {
   static createProvider(): LLMProvider {
-    const provider = process.env.LLM_PROVIDER?.toLowerCase()
-    const apiKey = process.env.LLM_API_KEY
-    const model = process.env.LLM_MODEL
-
-    // TODO: remove this logging
-    console.log(`LLM Provider Factory: provider=${provider}, model=${model}, hasApiKey=${!!apiKey}`)
+    const provider = env.LLM_PROVIDER?.toLowerCase()
+    const apiKey = env.LLM_API_KEY
+    const model = env.LLM_MODEL
 
     switch (provider) {
       case 'openai':
@@ -29,7 +29,7 @@ export class LLMProviderFactory {
 
       case 'fallback':
       case undefined:
-        console.log('Using fallback heuristic provider')
+        console.warn('Using fallback heuristic provider')
         return new FallbackProvider()
 
       default:
@@ -37,4 +37,4 @@ export class LLMProviderFactory {
         return new FallbackProvider()
     }
   }
-} 
+}

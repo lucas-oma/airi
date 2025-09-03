@@ -1,5 +1,5 @@
-import { bigint, boolean, index, integer, jsonb, pgTable, text, uniqueIndex, uuid, vector, pgEnum } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
+import { bigint, boolean, index, integer, jsonb, pgTable, text, uniqueIndex, uuid, vector } from 'drizzle-orm/pg-core'
 
 export const chatMessagesTable = pgTable('chat_messages', {
   id: uuid().primaryKey().defaultRandom(),

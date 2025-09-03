@@ -1,6 +1,6 @@
 /**
  * Memory Service - Centralized memory backend for AIRI
- * 
+ *
  * This service provides:
  * - REST API for memory operations (CRUD)
  * - WebSocket support for real-time updates
@@ -19,17 +19,15 @@ import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics'
 import { NodeSDK } from '@opentelemetry/sdk-node'
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions'
 
-// TODO: Import database initialization
+// TODO [lucas-ona]: Import database initialization
 // import { initDb } from './db'
-
 // Import API server
 import { createApp } from './api/server.js'
 import { BackgroundTrigger } from './services/background-trigger.js'
 import { MessageIngestionService } from './services/message-processing.js'
 
-// TODO: Import WebSocket server
+// TODO [lucas-oma]: Import WebSocket server
 // import { createWebSocketServer } from './api/websocket'
-
 import 'dotenv/config'
 
 setGlobalFormat(Format.Pretty)
@@ -54,31 +52,31 @@ async function main() {
 
   sdk.start()
 
-  // TODO: Initialize database connection
+  // TODO [lucas-oma]: Initialize database connection
   // await initDb()
 
   // Get shared message ingestion service singleton
   const messageIngestionService = MessageIngestionService.getInstance()
-  
+
   // Create REST API server with shared message ingestion service
   const app = createApp(messageIngestionService)
-  
+
   // Start background processing with shared message ingestion service (singleton)
   const backgroundTrigger = BackgroundTrigger.getInstance(messageIngestionService)
   backgroundTrigger.startProcessing(30000) // Process every 30 seconds
-  console.log('Background processing started')
+  console.warn('Background processing started')
 
   // Create and start REST API server
   const port = env.PORT || 3001
   app.listen(port, () => {
-    console.log(`Memory service running on port ${port}`)
+    console.warn(`Memory service running on port ${port}`)
   })
 
-  // TODO: Create and start WebSocket server
+  // TODO [lucas-oma]: Create and start WebSocket server
   // const wss = createWebSocketServer()
   // console.log('WebSocket server started')
 
-  console.log('Memory service started successfully!')
+  // console.log('Memory service started successfully!')
 }
 
 process.on('unhandledRejection', (err) => {
@@ -89,4 +87,4 @@ process.on('unhandledRejection', (err) => {
     .error('Unhandled rejection')
 })
 
-main().catch(console.error) 
+main().catch(console.error)

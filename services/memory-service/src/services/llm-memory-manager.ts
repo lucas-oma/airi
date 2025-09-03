@@ -1,24 +1,28 @@
 /**
  * LLM Memory Manager
- * 
+ *
  * This service handles:
  * - Processing batches of messages with LLM
  * - Creating memory fragments, goals, ideas, etc.
  * - Updating memory tables with structured data
  */
 
+// TODO [lucas-oma]: remove console.log comments
+
+import type { ProcessingBatch } from './background-trigger.js'
+import type { LLMProvider } from './llm-providers/base.js'
+
+import { inArray } from 'drizzle-orm'
+
 import { useDrizzle } from '../db/index.js'
 import {
   memoryFragmentsTable,
-  memoryTagsTable,
-  memoryTagRelationsTable,
   memoryLongTermGoalsTable,
   memoryShortTermIdeasTable,
+  memoryTagRelationsTable,
+  memoryTagsTable,
 } from '../db/schema.js'
-import type { ProcessingBatch } from './background-trigger.js'
 import { LLMProviderFactory } from './llm-providers/factory.js'
-import type { LLMProvider } from './llm-providers/base.js'
-import { inArray } from 'drizzle-orm'
 
 // NOTE: This interface defines the structured JSON output we expect from the LLM.
 export interface StructuredLLMResponse {
@@ -54,56 +58,54 @@ export class LLMMemoryManager {
 
   constructor() {
     this.llmProvider = LLMProviderFactory.createProvider()
-    console.log(`LLM Memory Manager initialized with provider: ${this.llmProvider.getProviderName()}`)
   }
 
   /**
    * Processes an entire batch of messages with a single, structured LLM call.
    */
   async processBatch(batch: ProcessingBatch): Promise<void> {
-    console.log(`🚀 LLM Memory Manager processing batch of ${batch.messages.length} messages`)
-    console.log(`🆔 Batch ID: ${Date.now()}-${Math.random().toString(36).substr(2, 9)}`)
-    console.log(`📋 Message IDs: ${batch.messageIds.join(', ')}`)
-    console.log(`📝 Message contents: ${batch.messages.map(m => m.content.substring(0, 50)).join(' | ')}`)
+    // console.log(`🚀 LLM Memory Manager processing batch of ${batch.messages.length} messages`)
+    // console.log(`🆔 Batch ID: ${Date.now()}-${Math.random().toString(36).substr(2, 9)}`)
+    // console.log(`📋 Message IDs: ${batch.messageIds.join(', ')}`)
+    // console.log(`📝 Message contents: ${batch.messages.map(m => m.content.substring(0, 50)).join(' | ')}`)
 
     // Skip processing if batch is empty
     if (batch.messages.length === 0) {
-      console.log('Skipping empty batch')
+      // console.log('Skipping empty batch')
       return
     }
 
     try {
-      console.log(`💰 Making LLM API call for batch...`)
-      const startTime = Date.now()
-      
+      // console.log(`💰 Making LLM API call for batch...`)
+      // const startTime = Date.now()
+
       // 1. Get a single, structured JSON response from the LLM for the entire batch.
       const structuredData = await this.llmProvider.processBatch(batch)
-      
-      const endTime = Date.now()
-      console.log(`✅ LLM API call completed in ${endTime - startTime}ms`)
-      console.log(`📊 LLM Response: ${JSON.stringify(structuredData).substring(0, 200)}...`)
+
+      // const endTime = Date.now()
+      // console.log(`✅ LLM API call completed in ${endTime - startTime}ms`)
+      // console.log(`📊 LLM Response: ${JSON.stringify(structuredData).substring(0, 200)}...`)
 
       // 2. Perform all database operations in a single transaction for efficiency.
-      console.log(`💾 Updating memory tables...`)
+      // console.log(`💾 Updating memory tables...`)
       await this.updateMemoryTables(structuredData)
 
-      console.log(`🎯 Successfully processed batch and updated memory tables.`)
-    } catch (error) {
+      // console.log(`🎯 Successfully processed batch and updated memory tables.`)
+    }
+    catch (error) {
       console.error('❌ An error occurred during batch processing:', error)
       throw error // Re-throw to allow the background trigger to handle the failure.
     }
   }
 
-
-
   /**
    * Updates all memory tables in a single, efficient transaction.
    */
   private async updateMemoryTables(structuredData: StructuredLLMResponse): Promise<void> {
-    console.log(`🔍 Processing ${structuredData.memoryFragments.length} memory fragments`)
-    console.log(`🏷️ Processing ${structuredData.goals.length} goals`)
-    console.log(`💡 Processing ${structuredData.ideas.length} ideas`)
-    
+    // console.log(`🔍 Processing ${structuredData.memoryFragments.length} memory fragments`)
+    // console.log(`🏷️ Processing ${structuredData.goals.length} goals`)
+    // console.log(`💡 Processing ${structuredData.ideas.length} ideas`)
+
     const memoryFragments = structuredData.memoryFragments.map(f => ({
       ...f,
       emotional_impact: f.emotionalImpact, // Drizzle expects snake_case
@@ -111,39 +113,39 @@ export class LLMMemoryManager {
       access_count: 1,
       created_at: Date.now(),
       last_accessed: Date.now(),
-      metadata: {}
-    }));
+      metadata: {},
+    }))
 
-    const tagsToCreate = new Set(structuredData.memoryFragments.flatMap(f => f.tags));
-    
+    const tagsToCreate = new Set(structuredData.memoryFragments.flatMap(f => f.tags))
+
     // Get existing tags first to avoid duplicates
     const existingTags = await this.db
       .select({ id: memoryTagsTable.id, name: memoryTagsTable.name })
       .from(memoryTagsTable)
-      .where(inArray(memoryTagsTable.name, Array.from(tagsToCreate)));
-    
-    const existingTagMap = new Map(existingTags.map(tag => [tag.name, tag.id]));
-    
+      .where(inArray(memoryTagsTable.name, Array.from(tagsToCreate)))
+
+    const existingTagMap = new Map(existingTags.map(tag => [tag.name, tag.id]))
+
     // Only create tags that don't already exist
-    const newTagNames = Array.from(tagsToCreate).filter(name => !existingTagMap.has(name));
+    const newTagNames = Array.from(tagsToCreate).filter(name => !existingTagMap.has(name))
     const newTags = newTagNames.map(name => ({
       name,
       description: `Auto-generated tag for ${name}`,
-      created_at: Date.now()
-    }));
+      created_at: Date.now(),
+    }))
 
     // Defer memory fragment insertion to the transaction below to avoid double insertions
-    
+
     // Insert only new tags and get their IDs (only if we have tags)
-    let createdTags: typeof existingTags = [];
+    let createdTags: typeof existingTags = []
     if (newTags.length > 0) {
-      createdTags = await this.db.insert(memoryTagsTable).values(newTags).returning();
+      createdTags = await this.db.insert(memoryTagsTable).values(newTags).returning()
     }
-    
+
     // Combine existing and new tags into a single map
-    const allTagMap = new Map<string, string>(existingTagMap);
+    const allTagMap = new Map<string, string>(existingTagMap)
     for (const tag of createdTags) {
-      allTagMap.set(tag.name, tag.id);
+      allTagMap.set(tag.name, tag.id)
     }
 
     // Tag relations will be created inside the transaction after fragment insertion
@@ -157,8 +159,8 @@ export class LLMMemoryManager {
       deadline: g.deadline,
       category: g.category,
       created_at: Date.now(),
-      updated_at: Date.now()
-    }));
+      updated_at: Date.now(),
+    }))
 
     const ideas = structuredData.ideas.map(i => ({
       content: i.content,
@@ -166,23 +168,24 @@ export class LLMMemoryManager {
       excitement: i.excitement,
       status: i.status,
       created_at: Date.now(),
-      updated_at: Date.now()
-    }));
+      updated_at: Date.now(),
+    }))
 
-    console.log(`💾 Starting database transaction...`)
+    // console.log(`💾 Starting database transaction...`)
     await this.db.transaction(async (tx) => {
       // Create fragments in bulk and then tag relations for the created fragments
       if (memoryFragments.length > 0) {
-        console.log(`📝 Inserting ${memoryFragments.length} memory fragments...`)
+        // console.log(`📝 Inserting ${memoryFragments.length} memory fragments...`)
         const createdFragments = await tx.insert(memoryFragmentsTable).values(memoryFragments).returning({ id: memoryFragmentsTable.id })
-        console.log(`✅ Memory fragments inserted`)
+        // console.log(`✅ Memory fragments inserted`)
 
         // Build tag relations using returned fragment IDs in order
-        const tagRelations: Array<{ memory_id: string; tag_id: string; created_at: number }> = []
+        const tagRelations: Array<{ memory_id: string, tag_id: string, created_at: number }> = []
         for (let i = 0; i < structuredData.memoryFragments.length; i++) {
           const f = structuredData.memoryFragments[i]
           const fragmentId = createdFragments[i]?.id
-          if (!fragmentId) continue
+          if (!fragmentId)
+            continue
           for (const tagName of f.tags) {
             const tagId = allTagMap.get(tagName)
             if (tagId) {
@@ -192,26 +195,26 @@ export class LLMMemoryManager {
         }
 
         if (tagRelations.length > 0) {
-          console.log(`🔗 Inserting ${tagRelations.length} tag relations...`)
+          // console.log(`🔗 Inserting ${tagRelations.length} tag relations...`)
           await tx.insert(memoryTagRelationsTable).values(tagRelations)
-          console.log(`✅ Tag relations inserted`)
+          // console.log(`✅ Tag relations inserted`)
         }
       }
 
       // Create goals in bulk
       if (goals.length > 0) {
-        console.log(`🎯 Inserting ${goals.length} goals...`)
-        await tx.insert(memoryLongTermGoalsTable).values(goals);
-        console.log(`✅ Goals inserted`)
+        // console.log(`🎯 Inserting ${goals.length} goals...`)
+        await tx.insert(memoryLongTermGoalsTable).values(goals)
+        // console.log(`✅ Goals inserted`)
       }
 
       // Create ideas in bulk
       if (ideas.length > 0) {
-        console.log(`💭 Inserting ${ideas.length} ideas...`)
-        await tx.insert(memoryShortTermIdeasTable).values(ideas);
-        console.log(`✅ Ideas inserted`)
+        // console.log(`💭 Inserting ${ideas.length} ideas...`)
+        await tx.insert(memoryShortTermIdeasTable).values(ideas)
+        // console.log(`✅ Ideas inserted`)
       }
-    });
-    console.log(`🎉 Database transaction completed successfully`)
+    })
+    // console.log(`🎉 Database transaction completed successfully`)
   }
-} 
+}

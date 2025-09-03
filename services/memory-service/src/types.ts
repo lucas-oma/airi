@@ -1,6 +1,6 @@
 /**
  * Type Definitions for Memory Service
- * 
+ *
  * This file defines:
  * - Request/Response interfaces for API endpoints
  * - Memory data structures
@@ -8,7 +8,7 @@
  * - Validation schemas
  */
 
-import type { z } from 'zod'
+// import type { z } from 'zod'
 
 // TODO: Define Zod schemas for validation
 // export const CreateMemorySchema = z.object({
@@ -63,4 +63,6 @@ import type { z } from 'zod'
 //   error: string
 //   code?: string
 //   details?: Record<string, unknown>
-// } 
+// }
+
+// TODO [lucas-oma]: consider removing this file

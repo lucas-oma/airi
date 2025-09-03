@@ -1,9 +1,9 @@
-import { env } from 'node:process'
-import { Pool } from 'pg'
+import { env, exit } from 'node:process'
 
+import { sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/node-postgres'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
-import { sql } from 'drizzle-orm'
+import { Pool } from 'pg'
 
 import * as schema from './schema'
 
@@ -26,7 +26,7 @@ export function initPool() {
     // Handle pool errors
     pool.on('error', (err) => {
       console.error('Unexpected error on idle client', err)
-      process.exit(-1)
+      exit(-1) // TODO [lucas-oma]: check this line
     })
   }
   return pool
@@ -53,22 +53,23 @@ export function useDrizzle() {
 /**
  * Health check for database connection
  */
-export async function healthCheck(): Promise<{ status: 'healthy' | 'unhealthy'; message: string }> {
+export async function healthCheck(): Promise<{ status: 'healthy' | 'unhealthy', message: string }> {
   try {
     const db = useDrizzle()
-    
+
     // Test connection with a simple query
     await db.execute(sql`SELECT 1 as test`)
-    
+
     return {
       status: 'healthy',
-      message: 'Database connection is working'
+      message: 'Database connection is working',
     }
-  } catch (error) {
+  }
+  catch (error) {
     console.error('Database health check failed:', error)
     return {
       status: 'unhealthy',
-      message: `Database connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      message: `Database connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
     }
   }
 }
@@ -80,11 +81,12 @@ export async function runMigrations(): Promise<void> {
   try {
     const pool = initPool()
     const db = drizzle(pool, { schema })
-    
-    console.log('Running database migrations...')
+
+    console.warn('Running database migrations...')
     await migrate(db, { migrationsFolder: './drizzle' })
-    console.log('Database migrations completed successfully')
-  } catch (error) {
+    console.warn('Database migrations completed successfully')
+  }
+  catch (error) {
     console.error('Failed to run migrations:', error)
     throw error
   }
@@ -96,8 +98,6 @@ export async function runMigrations(): Promise<void> {
 export async function closeConnections(): Promise<void> {
   if (pool) {
     await pool.end()
-    console.log('Database connections closed')
+    console.warn('Database connections closed')
   }
 }
-
-

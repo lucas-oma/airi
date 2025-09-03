@@ -1,24 +1,29 @@
 #!/usr/bin/env tsx
 
+import { exit } from 'node:process'
+
 import { config } from 'dotenv'
-import { runMigrations, closeConnections } from './index.js'
+
+import { closeConnections, runMigrations } from './index.js'
 
 // Load environment variables
 config()
 
 async function migrate() {
-  console.log('🔄 Running database migrations...')
+  console.warn('🔄 Running database migrations...')
 
   try {
     await runMigrations()
-    console.log('✅ Migrations completed successfully')
-  } catch (error) {
+    console.warn('✅ Migrations completed successfully')
+  }
+  catch (error) {
     console.error('❌ Migration failed:', error)
-    process.exit(1)
-  } finally {
+    exit(1)
+  }
+  finally {
     await closeConnections()
   }
 }
 
 // Run migrations
-migrate() 
+migrate()

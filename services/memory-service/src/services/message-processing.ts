@@ -1,44 +1,45 @@
-import { useDrizzle } from '../db/index.js';
-import { chatMessagesTable } from '../db/schema.js';
-import { eq, asc, isNull, inArray } from 'drizzle-orm';
+import { asc, eq, inArray } from 'drizzle-orm'
+
+import { useDrizzle } from '../db/index.js'
+import { chatMessagesTable } from '../db/schema.js'
 
 export class MessageIngestionService {
-  private static instance: MessageIngestionService | null = null;
-  private db = useDrizzle();
-  
+  private static instance: MessageIngestionService | null = null
+  private db = useDrizzle()
+
   public static getInstance(): MessageIngestionService {
     if (!MessageIngestionService.instance) {
-      MessageIngestionService.instance = new MessageIngestionService();
+      MessageIngestionService.instance = new MessageIngestionService()
     }
-    return MessageIngestionService.instance;
+    return MessageIngestionService.instance
   }
 
   private constructor() {
-    console.log('📋 Message ingestion service initialized')
+    console.warn('📋 Message ingestion service initialized')
   }
 
   /**
    * Mark a message as ready for processing
    */
-  async markMessageForProcessing(messageId: string, content: string): Promise<void> {
-    console.log(`🔄 Marking message ${messageId} for processing...`)
-    console.log(`📝 Message content: ${content.substring(0, 100)}${content.length > 100 ? '...' : ''}`)
-    
+  async markMessageForProcessing(messageId: string): Promise<void> {
+    // console.log(`🔄 Marking message ${messageId} for processing...`)
+    // console.log(`📝 Message content: ${content.substring(0, 100)}${content.length > 100 ? '...' : ''}`)
+
     try {
       // The message is already in chatMessagesTable, we just ensure it's marked as unprocessed
       await this.db
         .update(chatMessagesTable)
-        .set({ 
+        .set({
           is_processed: false, // Mark as ready for processing
-          updated_at: Date.now()
+          updated_at: Date.now(),
         })
-        .where(eq(chatMessagesTable.id, messageId));
-      
-      const pendingCount = await this.getQueueLength()
-      console.log(`✅ Successfully marked message ${messageId} for processing`)
-      console.log(`📊 Pending messages: ${pendingCount}`)
-      
-    } catch (error) {
+        .where(eq(chatMessagesTable.id, messageId))
+
+      // const pendingCount = await this.getQueueLength()
+      // console.log(`✅ Successfully marked message ${messageId} for processing`)
+      // console.log(`📊 Pending messages: ${pendingCount}`)
+    }
+    catch (error) {
       console.error(`❌ Failed to mark message ${messageId} for processing:`, error)
       throw error
     }
@@ -47,7 +48,7 @@ export class MessageIngestionService {
   /**
    * Get batch of unprocessed messages ready for ingestion
    */
-  async getUnprocessedBatch(size: number): Promise<Array<{ messageId: string; content: string; timestamp: number }>> {
+  async getUnprocessedBatch(size: number): Promise<Array<{ messageId: string, content: string, timestamp: number }>> {
     try {
       const messages = await this.db
         .select({
@@ -58,14 +59,15 @@ export class MessageIngestionService {
         .from(chatMessagesTable)
         .where(eq(chatMessagesTable.is_processed, false)) // Get unprocessed messages (false, not NULL)
         .orderBy(asc(chatMessagesTable.created_at)) // Process oldest first
-        .limit(size);
+        .limit(size)
 
       return messages.map(msg => ({
         messageId: msg.id,
         content: msg.content,
-        timestamp: msg.created_at
-      }));
-    } catch (error) {
+        timestamp: msg.created_at,
+      }))
+    }
+    catch (error) {
       console.error('Failed to get unprocessed batch:', error)
       return []
     }
@@ -79,14 +81,15 @@ export class MessageIngestionService {
       // Update all messages in batch using IN clause
       await this.db
         .update(chatMessagesTable)
-        .set({ 
+        .set({
           is_processed: true,
-          updated_at: Date.now()
+          updated_at: Date.now(),
         })
-        .where(inArray(chatMessagesTable.id, messageIds)); // Update all messages in batch
+        .where(inArray(chatMessagesTable.id, messageIds)) // Update all messages in batch
 
-      console.log(`✅ Marked ${messageIds.length} messages as processed`)
-    } catch (error) {
+      // console.log(`✅ Marked ${messageIds.length} messages as processed`)
+    }
+    catch (error) {
       console.error('Failed to mark messages as processed:', error)
       throw error
     }
@@ -100,10 +103,11 @@ export class MessageIngestionService {
       const result = await this.db
         .select({ count: chatMessagesTable.id })
         .from(chatMessagesTable)
-        .where(eq(chatMessagesTable.is_processed, false)); // Look for false, not NULL
-      
-      return result.length;
-    } catch (error) {
+        .where(eq(chatMessagesTable.is_processed, false)) // Look for false, not NULL
+
+      return result.length
+    }
+    catch (error) {
       console.error('Failed to get queue length:', error)
       return 0
     }
@@ -113,10 +117,10 @@ export class MessageIngestionService {
    * Get queue status (for monitoring)
    */
   async getQueueStatus(): Promise<{
-    waiting: number;
-    active: number;
-    completed: number;
-    failed: number;
+    waiting: number
+    active: number
+    completed: number
+    failed: number
   }> {
     try {
       const [waiting, completed] = await Promise.all([
@@ -127,16 +131,17 @@ export class MessageIngestionService {
         this.db
           .select({ count: chatMessagesTable.id })
           .from(chatMessagesTable)
-          .where(eq(chatMessagesTable.is_processed, true))
-      ]);
+          .where(eq(chatMessagesTable.is_processed, true)),
+      ])
 
       return {
         waiting: waiting.length,
         active: 0, // No active concept in PostgreSQL queue
         completed: completed.length,
-        failed: 0 // No failed concept in PostgreSQL queue
-      };
-    } catch (error) {
+        failed: 0, // No failed concept in PostgreSQL queue
+      }
+    }
+    catch (error) {
       console.error('Failed to get queue status:', error)
       return { waiting: 0, active: 0, completed: 0, failed: 0 }
     }
@@ -149,14 +154,15 @@ export class MessageIngestionService {
     try {
       await this.db
         .update(chatMessagesTable)
-        .set({ 
+        .set({
           is_processed: true,
-          updated_at: Date.now()
+          updated_at: Date.now(),
         })
-        .where(eq(chatMessagesTable.is_processed, false)); // Look for false, not NULL
-      
-      console.log('🧹 Queue cleared (all messages marked as processed)')
-    } catch (error) {
+        .where(eq(chatMessagesTable.is_processed, false)) // Look for false, not NULL
+
+      // console.log('🧹 Queue cleared (all messages marked as processed)')
+    }
+    catch (error) {
       console.error('Failed to clear queue:', error)
       throw error
     }
@@ -169,23 +175,24 @@ export class MessageIngestionService {
     try {
       // Use raw SQL for PostgreSQL advisory locks
       const result = await this.db.execute(
-        `SELECT pg_try_advisory_lock(${lockId})`
-      );
-      
+        `SELECT pg_try_advisory_lock(${lockId})`,
+      )
+
       // Debug: Log the result structure
-      console.log(`🔒 Lock result structure:`, JSON.stringify(result, null, 2));
-      
+      // console.log(`🔒 Lock result structure:`, JSON.stringify(result, null, 2))
+
       // pg_try_advisory_lock returns true if lock acquired, false if not
       // The result structure has rows array with the actual data
       if (result.rows && Array.isArray(result.rows) && result.rows.length > 0) {
-        const lockResult = result.rows[0];
-        const acquired = lockResult.pg_try_advisory_lock === true;
-        console.log(`🔒 Lock acquired: ${acquired}, lockResult:`, lockResult);
-        return acquired;
+        const lockResult = result.rows[0]
+        const acquired = lockResult.pg_try_advisory_lock === true
+        // console.log(`🔒 Lock acquired: ${acquired}, lockResult:`, lockResult)
+        return acquired
       }
-      console.log(`🔒 No rows array, returning false`);
-      return false;
-    } catch (error) {
+      // console.log(`🔒 No rows array, returning false`)
+      return false
+    }
+    catch (error) {
       console.error('Failed to acquire lock:', error)
       return false
     }
@@ -196,9 +203,10 @@ export class MessageIngestionService {
    */
   async releaseLock(lockId: number): Promise<void> {
     try {
-      await this.db.execute(`SELECT pg_advisory_unlock(${lockId})`);
-    } catch (error) {
+      await this.db.execute(`SELECT pg_advisory_unlock(${lockId})`)
+    }
+    catch (error) {
       console.error('Failed to release lock:', error)
     }
   }
-} 
+}
