@@ -1,0 +1,184 @@
+import { bigint, boolean, index, integer, jsonb, pgTable, text, uniqueIndex, uuid, vector, pgEnum } from 'drizzle-orm/pg-core'
+import { sql } from 'drizzle-orm'
+
+export const chatMessagesTable = pgTable('chat_messages', {
+  id: uuid().primaryKey().defaultRandom(),
+  platform: text().notNull().default(''),
+  content: text().notNull().default(''),
+  is_processed: boolean().notNull().default(false), // Flag for processing status
+  created_at: bigint({ mode: 'number' }).notNull().default(0).$defaultFn(() => Date.now()),
+  updated_at: bigint({ mode: 'number' }).notNull().default(0).$defaultFn(() => Date.now()),
+  content_vector_1536: vector({ dimensions: 1536 }),
+  content_vector_1024: vector({ dimensions: 1024 }),
+  content_vector_768: vector({ dimensions: 768 }),
+}, table => [
+  // Partial index for unprocessed messages - only indexes FALSE values
+  index('chat_messages_unprocessed_index').on(table.is_processed).where(sql`${table.is_processed} = false`),
+  // Vector indexes for similarity search
+  index('chat_messages_content_vector_1536_index').using('hnsw', table.content_vector_1536.op('vector_cosine_ops')),
+  index('chat_messages_content_vector_1024_index').using('hnsw', table.content_vector_1024.op('vector_cosine_ops')),
+  index('chat_messages_content_vector_768_index').using('hnsw', table.content_vector_768.op('vector_cosine_ops')),
+])
+
+export const chatCompletionsHistoryTable = pgTable('chat_completions_history', {
+  id: uuid().primaryKey().defaultRandom(),
+  prompt: text().notNull(),
+  response: text().notNull(),
+  task: text().notNull(),
+  created_at: bigint({ mode: 'number' }).notNull().default(0).$defaultFn(() => Date.now()),
+})
+
+// Memory Item table - base table for all memories
+export const memoryFragmentsTable = pgTable('memory_fragments', {
+  id: uuid().primaryKey().defaultRandom(),
+  content: text().notNull(),
+  memory_type: text().notNull(), // 'working', 'short_term', 'long_term', 'muscle'
+  category: text().notNull(), // 'chat', 'relationships', 'people', 'life', etc.
+  importance: integer().notNull().default(5), // 1-10 scale
+  emotional_impact: integer().notNull().default(0), // -10 to 10 scale
+  created_at: bigint({ mode: 'number' }).notNull().default(0).$defaultFn(() => Date.now()),
+  last_accessed: bigint({ mode: 'number' }).notNull().default(0).$defaultFn(() => Date.now()),
+  access_count: integer().notNull().default(1),
+  metadata: jsonb().notNull().default({}),
+  content_vector_1536: vector({ dimensions: 1536 }),
+  content_vector_1024: vector({ dimensions: 1024 }),
+  content_vector_768: vector({ dimensions: 768 }),
+  deleted_at: bigint({ mode: 'number' }), // nullable timestamp for soft delete
+}, table => [
+  // Vector indexes for efficient similarity search
+  index('memory_items_content_vector_1536_index').using('hnsw', table.content_vector_1536.op('vector_cosine_ops')),
+  index('memory_items_content_vector_1024_index').using('hnsw', table.content_vector_1024.op('vector_cosine_ops')),
+  index('memory_items_content_vector_768_index').using('hnsw', table.content_vector_768.op('vector_cosine_ops')),
+  // Standard indexes for common queries
+  index('memory_items_memory_type_index').on(table.memory_type),
+  index('memory_items_category_index').on(table.category),
+  index('memory_items_importance_index').on(table.importance),
+  index('memory_items_created_at_index').on(table.created_at),
+  index('memory_items_last_accessed_index').on(table.last_accessed),
+])
+
+// Memory Associations table - for linking related memories
+export const memoryAssociationsTable = pgTable('memory_associations', {
+  id: uuid().primaryKey().defaultRandom(),
+  source_memory_id: uuid().notNull().references(() => memoryFragmentsTable.id, { onDelete: 'cascade' }),
+  target_memory_id: uuid().notNull().references(() => memoryFragmentsTable.id, { onDelete: 'cascade' }),
+  association_type: text().notNull(), // 'similar', 'related', 'opposite', 'temporal', etc.
+  strength: integer().notNull().default(5), // 1-10 scale
+  created_at: bigint({ mode: 'number' }).notNull().default(0).$defaultFn(() => Date.now()),
+  metadata: jsonb().notNull().default({}),
+}, table => [
+  uniqueIndex('memory_associations_unique').on(table.source_memory_id, table.target_memory_id, table.association_type),
+  index('memory_associations_source_index').on(table.source_memory_id),
+  index('memory_associations_target_index').on(table.target_memory_id),
+  index('memory_associations_type_index').on(table.association_type),
+])
+
+// Memory Consolidation Events table - for tracking memory processing
+export const memoryConsolidationEventsTable = pgTable('memory_consolidation_events', {
+  id: uuid().primaryKey().defaultRandom(),
+  memory_id: uuid().notNull().references(() => memoryFragmentsTable.id, { onDelete: 'cascade' }),
+  event_type: text().notNull(), // 'created', 'accessed', 'consolidated', 'forgotten', etc.
+  consolidation_score: integer(), // nullable, only for consolidation events
+  created_at: bigint({ mode: 'number' }).notNull().default(0).$defaultFn(() => Date.now()),
+  metadata: jsonb().notNull().default({}),
+}, table => [
+  index('memory_consolidation_events_memory_id_index').on(table.memory_id),
+  index('memory_consolidation_events_type_index').on(table.event_type),
+  index('memory_consolidation_events_created_at_index').on(table.created_at),
+])
+
+// Memory Tags table - for flexible categorization
+export const memoryTagsTable = pgTable('memory_tags', {
+  id: uuid().primaryKey().defaultRandom(),
+  name: text().notNull().unique(),
+  description: text(),
+  color: text(), // hex color code
+  created_at: bigint({ mode: 'number' }).notNull().default(0).$defaultFn(() => Date.now()),
+}, table => [
+  index('memory_tags_name_index').on(table.name),
+])
+
+// Memory-Tag relationships table
+export const memoryTagRelationsTable = pgTable('memory_tag_relations', {
+  id: uuid().primaryKey().defaultRandom(),
+  memory_id: uuid().notNull().references(() => memoryFragmentsTable.id, { onDelete: 'cascade' }),
+  tag_id: uuid().notNull().references(() => memoryTagsTable.id, { onDelete: 'cascade' }),
+  created_at: bigint({ mode: 'number' }).notNull().default(0).$defaultFn(() => Date.now()),
+}, table => [
+  uniqueIndex('memory_tag_relations_unique').on(table.memory_id, table.tag_id),
+  index('memory_tag_relations_memory_id_index').on(table.memory_id),
+  index('memory_tag_relations_tag_id_index').on(table.tag_id),
+])
+
+// Memory Search History table - for improving search relevance
+export const memorySearchHistoryTable = pgTable('memory_search_history', {
+  id: uuid().primaryKey().defaultRandom(),
+  query: text().notNull(),
+  results_count: integer().notNull(),
+  selected_memory_id: uuid().references(() => memoryFragmentsTable.id, { onDelete: 'set null' }),
+  search_duration_ms: integer(),
+  created_at: bigint({ mode: 'number' }).notNull().default(0).$defaultFn(() => Date.now()),
+  metadata: jsonb().notNull().default({}),
+}, table => [
+  index('memory_search_history_query_index').on(table.query),
+  index('memory_search_history_created_at_index').on(table.created_at),
+])
+
+// Memory Access Patterns table - for understanding usage patterns
+export const memoryAccessPatternsTable = pgTable('memory_access_patterns', {
+  id: uuid().primaryKey().defaultRandom(),
+  memory_id: uuid().notNull().references(() => memoryFragmentsTable.id, { onDelete: 'cascade' }),
+  access_type: text().notNull(), // 'read', 'search', 'consolidation', 'forgetting'
+  context: text(), // what triggered this access
+  duration_ms: integer(), // how long the memory was accessed
+  created_at: bigint({ mode: 'number' }).notNull().default(0).$defaultFn(() => Date.now()),
+  metadata: jsonb().notNull().default({}),
+}, table => [
+  index('memory_access_patterns_memory_id_index').on(table.memory_id),
+  index('memory_access_patterns_type_index').on(table.access_type),
+  index('memory_access_patterns_created_at_index').on(table.created_at),
+])
+
+// Goals table - for tracking user goals and objectives
+export const memoryLongTermGoalsTable = pgTable('memory_long_term_goals', {
+  id: uuid().primaryKey().defaultRandom(),
+  title: text().notNull(),
+  description: text().notNull(),
+  priority: integer().notNull().default(5), // 1-10 scale
+  progress: integer().notNull().default(0), // 0-100 percentage
+  deadline: bigint({ mode: 'number' }), // nullable timestamp
+  status: text().notNull().default('planned'), // 'planned', 'in_progress', 'completed', 'abandoned'
+  parent_goal_id: uuid(), // nullable, self-reference will be added after table definition
+  category: text().notNull().default('personal'),
+  created_at: bigint({ mode: 'number' }).notNull().default(0).$defaultFn(() => Date.now()),
+  updated_at: bigint({ mode: 'number' }).notNull().default(0).$defaultFn(() => Date.now()),
+  deleted_at: bigint({ mode: 'number' }), // nullable timestamp for soft delete
+}, table => [
+  index('memory_long_term_goals_priority_index').on(table.priority),
+  index('memory_long_term_goals_status_index').on(table.status),
+  index('memory_long_term_goals_deadline_index').on(table.deadline),
+  index('memory_long_term_goals_parent_goal_id_index').on(table.parent_goal_id),
+])
+
+// Ideas generated from dreams or normal thinking
+export const memoryShortTermIdeasTable = pgTable('memory_short_term_ideas', {
+  id: uuid().primaryKey().defaultRandom(),
+  content: text().notNull(),
+  source_type: text().notNull().default('dream'), // 'dream', 'conversation', 'reflection'
+  source_id: text(), // nullable ID of source (dream ID, conversation ID, etc.)
+  status: text().notNull().default('new'), // 'new', 'developing', 'implemented', 'abandoned'
+  excitement: integer().notNull().default(5), // 1-10 scale
+  created_at: bigint({ mode: 'number' }).notNull().default(0).$defaultFn(() => Date.now()),
+  updated_at: bigint({ mode: 'number' }).notNull().default(0).$defaultFn(() => Date.now()),
+  content_vector_1536: vector({ dimensions: 1536 }),
+  content_vector_1024: vector({ dimensions: 1024 }),
+  content_vector_768: vector({ dimensions: 768 }),
+  deleted_at: bigint({ mode: 'number' }), // nullable timestamp for soft delete
+}, table => [
+  index('memory_short_term_ideas_source_type_index').on(table.source_type),
+  index('memory_short_term_ideas_status_index').on(table.status),
+  index('memory_short_term_ideas_excitement_index').on(table.excitement),
+  index('memory_short_term_ideas_content_vector_1536_index').using('hnsw', table.content_vector_1536.op('vector_cosine_ops')),
+  index('memory_short_term_ideas_content_vector_1024_index').using('hnsw', table.content_vector_1024.op('vector_cosine_ops')),
+  index('memory_short_term_ideas_content_vector_768_index').using('hnsw', table.content_vector_768.op('vector_cosine_ops')),
+])
