@@ -9,6 +9,7 @@ import { ref, toRaw } from 'vue'
 
 import { useQueue } from '../composables'
 import { useLlmmarkerParser } from '../composables/llmmarkerParser'
+import { useMemoryService } from '../composables/useMemoryService'
 import { useLLM } from '../stores/llm'
 import { TTS_FLUSH_INSTRUCTION } from '../utils/tts'
 import { useAiriCardStore } from './modules'
@@ -18,9 +19,12 @@ export interface ErrorMessage {
   content: string
 }
 
+// TODO [lucas-oma]: remove console.debug and console.log before merging (eslint)
+
 export const useChatStore = defineStore('chat', () => {
   const { stream, discoverToolsCompatibility } = useLLM()
   const { systemPrompt } = storeToRefs(useAiriCardStore())
+  const { storeUserMessage, storeAIResponse } = useMemoryService()
 
   const sending = ref(false)
 
@@ -78,6 +82,44 @@ export const useChatStore = defineStore('chat', () => {
 
   const streamingMessage = ref<ChatAssistantMessage>({ role: 'assistant', content: '', slices: [], tool_results: [] })
 
+  // Dedupe guard to prevent duplicate storage calls
+  const DEDUPE_WINDOW_MS = 80
+  const DEDUPE_STORAGE_KEY = 'airi-chat-last-message'
+
+  function shouldSkipStorage(message: string): boolean {
+    try {
+      // console.log(`Dedupe check for message: "${message.substring(0, 50)}..."`)
+
+      const lastMessageData = localStorage.getItem(DEDUPE_STORAGE_KEY)
+      if (!lastMessageData) {
+        // console.log(`No previous message found, allowing storage`)
+        localStorage.setItem(DEDUPE_STORAGE_KEY, JSON.stringify({ message, timestamp: Date.now() }))
+        return false
+      }
+
+      const { message: lastMessage, timestamp } = JSON.parse(lastMessageData)
+      const now = Date.now()
+      const timeDiff = now - timestamp
+
+      // console.log(`Last message: "${lastMessage.substring(0, 50)}..." (${timeDiff}ms ago)`)
+
+      // Skip if same message and within dedupe window
+      if (message === lastMessage && timeDiff < DEDUPE_WINDOW_MS) {
+        // console.log(`Skipping duplicate message storage: "${message.substring(0, 50)}..." (${timeDiff}ms ago)`)
+        return true
+      }
+
+      // Update with current message
+      // console.log(`Updating stored message, allowing storage`)
+      localStorage.setItem(DEDUPE_STORAGE_KEY, JSON.stringify({ message, timestamp: now }))
+      return false
+    }
+    catch (error) {
+      console.warn('Dedupe guard error:', error)
+      return false
+    }
+  }
+
   async function send(
     sendingMessage: string,
     options: {
@@ -115,6 +157,17 @@ export const useChatStore = defineStore('chat', () => {
       const finalContent = contentParts.length > 1 ? contentParts : sendingMessage
 
       messages.value.push({ role: 'user', content: finalContent })
+
+      // Async: Store user message in memory service (fire and forget)
+      if (!shouldSkipStorage(sendingMessage)) {
+        // console.log(`Storing user message: "${sendingMessage.substring(0, 50)}..."`)
+        storeUserMessage(sendingMessage, 'web').catch((error) => {
+          console.warn('Memory storage failed:', error)
+        })
+      }
+      else {
+        // console.log(`Skipped storing user message due to dedupe`)
+      }
 
       const parser = useLlmmarkerParser({
         onLiteral: async (literal) => {
@@ -159,7 +212,9 @@ export const useChatStore = defineStore('chat', () => {
         ],
       })
 
+      // Reset the streaming message for the next turn
       streamingMessage.value = { role: 'assistant', content: '', slices: [], tool_results: [] }
+      // Don't reset currentResponseStored here - it should persist for the entire response
       const newMessages = messages.value.map((msg) => {
         if (msg.role === 'assistant') {
           const { slices: _, ...rest } = msg // exclude slices
@@ -201,6 +256,8 @@ export const useChatStore = defineStore('chat', () => {
             await parser.consume(event.text)
           }
           else if (event.type === 'finish') {
+            // console.log(`Stream FINISH event triggered`)
+
             // Finalize the parsing of the actual message content
             await parser.end()
 
@@ -224,8 +281,18 @@ export const useChatStore = defineStore('chat', () => {
             for (const hook of onAssistantResponseEndHooks.value)
               await hook(fullText)
 
-            // eslint-disable-next-line no-console
-            console.debug('LLM output:', fullText)
+            // Async: Store AI response in memory service (fire and forget)
+            if (!shouldSkipStorage(sendingMessage)) {
+              // console.log(`Storing AI response: "${sendingMessage.substring(0, 50)}..."`)
+              storeAIResponse(sendingMessage, fullText, 'web').catch((error) => {
+                console.warn('Memory storage failed:', error)
+              })
+            }
+            else {
+              // console.log(`Skipped storing AI response due to dedupe`)
+            }
+
+            // console.debug('LLM output:', fullText)
           }
         },
       })
