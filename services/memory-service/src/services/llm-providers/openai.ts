@@ -4,6 +4,8 @@ import type { LLMProvider } from './base.js'
 
 import OpenAI from 'openai'
 
+import { INGESTION_PROMPT } from '../prompts.js'
+
 export class OpenAIProvider implements LLMProvider {
   private client: OpenAI
   private model: string
@@ -23,56 +25,11 @@ export class OpenAIProvider implements LLMProvider {
       content: msg.content,
     }))
 
-    const systemPrompt = `You are an AI memory manager. Analyze the following messages and extract structured information.
-
-Please provide a JSON response with exactly this structure:
-{
-  "memoryFragments": [
-    {
-      "content": "Brief description of the memory",
-      "memoryType": "working|short_term|long_term|muscle",
-      "category": "work|personal|relationships|ideas|emotions|general",
-      "importance": 1-10,
-      "emotionalImpact": -10 to 10,
-      "tags": ["tag1", "tag2"]
-    }
-  ],
-  "goals": [
-    {
-      "title": "Goal title",
-      "description": "Goal description",
-      "priority": 1-10,
-      "deadline": null or timestamp,
-      "category": "work|personal|relationships|general"
-    }
-  ],
-  "ideas": [
-    {
-      "content": "Idea description",
-      "sourceType": "conversation|reflection|dream",
-      "excitement": 1-10,
-      "status": "new|developing|implemented|abandoned"
-    }
-  ]
-}
-
-Memory types:
-- working: Immediate tasks, current focus
-- short_term: Recent events, conversations
-- long_term: Important memories, goals, plans
-- muscle: How-to knowledge, procedures
-
-Categories: work, personal, relationships, ideas, emotions, general
-Source types: conversation, reflection, dream
-Status: new, developing, implemented, abandoned
-
-Analyze the semantic meaning, not just keywords.`
-
     try {
       const response = await this.client.chat.completions.create({
         model: this.model,
         messages: [
-          { role: 'system', content: systemPrompt },
+          { role: 'system', content: INGESTION_PROMPT },
           ...messages,
         ],
         response_format: { type: 'json_object' },
@@ -107,6 +64,19 @@ Analyze the semantic meaning, not just keywords.`
     }
     if (!response.ideas || !Array.isArray(response.ideas)) {
       throw new Error('Invalid response: missing or invalid ideas')
+    }
+    // Optional fields - validate if present
+    if (response.episodes && !Array.isArray(response.episodes)) {
+      throw new Error('Invalid response: episodes must be an array if present')
+    }
+    if (response.entities && !Array.isArray(response.entities)) {
+      throw new Error('Invalid response: entities must be an array if present')
+    }
+    if (response.entityRelations && !Array.isArray(response.entityRelations)) {
+      throw new Error('Invalid response: entityRelations must be an array if present')
+    }
+    if (response.consolidatedMemories && !Array.isArray(response.consolidatedMemories)) {
+      throw new Error('Invalid response: consolidatedMemories must be an array if present')
     }
   }
 }

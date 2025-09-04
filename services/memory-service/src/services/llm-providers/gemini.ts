@@ -4,6 +4,8 @@ import type { LLMProvider } from './base.js'
 
 import { GoogleGenerativeAI } from '@google/generative-ai'
 
+import { INGESTION_PROMPT } from '../prompts.js'
+
 export class GeminiProvider implements LLMProvider {
   private genAI: GoogleGenerativeAI
   private model: string
@@ -20,67 +22,22 @@ export class GeminiProvider implements LLMProvider {
   async processBatch(batch: ProcessingBatch): Promise<StructuredLLMResponse> {
     const model = this.genAI.getGenerativeModel({ model: this.model })
 
-    const systemPrompt = `You are an AI memory manager. Analyze the following messages and extract structured information.
-
-Please provide a JSON response with exactly this structure:
-{
-  "memoryFragments": [
-    {
-      "content": "Brief description of the memory",
-      "memoryType": "working|short_term|long_term|muscle",
-      "category": "work|personal|relationships|ideas|emotions|general",
-      "importance": 1-10,
-      "emotionalImpact": -10 to 10,
-      "tags": ["tag1", "tag2"]
-    }
-  ],
-  "goals": [
-    {
-      "title": "Goal title",
-      "description": "Goal description",
-      "priority": 1-10,
-      "deadline": null or timestamp,
-      "category": "work|personal|relationships|general"
-    }
-  ],
-  "ideas": [
-    {
-      "content": "Idea description",
-      "sourceType": "conversation|reflection|dream",
-      "excitement": 1-10,
-      "status": "new|developing|implemented|abandoned"
-    }
-  ]
-}
-
-Memory types:
-- working: Immediate tasks, current focus
-- short_term: Recent events, conversations
-- long_term: Important memories, goals, plans
-- muscle: How-to knowledge, procedures
-
-Categories: work, personal, relationships, ideas, emotions, general
-Source types: conversation, reflection, dream
-Status: new, developing, implemented, abandoned
-
-Analyze the semantic meaning, not just keywords.`
-
     const userMessages = batch.messages.map(msg => `User: ${msg.content}`).join('\n\n')
-    const fullPrompt = `${systemPrompt}\n\nMessages to analyze:\n\n${userMessages}`
+    const fullPrompt = `${INGESTION_PROMPT}\n\nMessages to analyze:\n\n${userMessages}`
 
     try {
       const result = await model.generateContent(fullPrompt)
-      const response = await result.response
-      const content = response.text()
+      const response = result.response
+      const text = response.text()
 
-      if (!content) {
-        throw new Error('No response content from Gemini')
+      if (!text) {
+        throw new Error('No response text from Gemini')
       }
 
-      // Extract JSON from the response (Gemini might wrap it in markdown)
-      const jsonMatch = content.match(/\{[\s\S]*\}/)
+      // Extract JSON from the response
+      const jsonMatch = text.match(/\{[\s\S]*\}/)
       if (!jsonMatch) {
-        throw new Error('No JSON response found in Gemini output')
+        throw new Error('No JSON response found in Gemini response')
       }
 
       const parsed = JSON.parse(jsonMatch[0]) as StructuredLLMResponse
@@ -105,6 +62,19 @@ Analyze the semantic meaning, not just keywords.`
     }
     if (!response.ideas || !Array.isArray(response.ideas)) {
       throw new Error('Invalid response: missing or invalid ideas')
+    }
+    // Optional fields - validate if present
+    if (response.episodes && !Array.isArray(response.episodes)) {
+      throw new Error('Invalid response: episodes must be an array if present')
+    }
+    if (response.entities && !Array.isArray(response.entities)) {
+      throw new Error('Invalid response: entities must be an array if present')
+    }
+    if (response.entityRelations && !Array.isArray(response.entityRelations)) {
+      throw new Error('Invalid response: entityRelations must be an array if present')
+    }
+    if (response.consolidatedMemories && !Array.isArray(response.consolidatedMemories)) {
+      throw new Error('Invalid response: consolidatedMemories must be an array if present')
     }
   }
 }

@@ -13,6 +13,21 @@ export class FallbackProvider implements LLMProvider {
     const memoryFragments: StructuredLLMResponse['memoryFragments'] = []
     const goals: StructuredLLMResponse['goals'] = []
     const ideas: StructuredLLMResponse['ideas'] = []
+    const episodes: StructuredLLMResponse['episodes'] = []
+    const entities: StructuredLLMResponse['entities'] = []
+    const entityRelations: StructuredLLMResponse['entityRelations'] = []
+    const consolidatedMemories: StructuredLLMResponse['consolidatedMemories'] = []
+
+    // Create a single episode for the batch if it has multiple messages
+    if (batch.messages.length > 1) {
+      episodes.push({
+        episodeType: 'chat_session',
+        title: `Chat session with ${batch.messages.length} messages`,
+        startTime: Date.now(),
+        endTime: undefined,
+        metadata: { messageCount: batch.messages.length },
+      })
+    }
 
     for (const message of batch.messages) {
       const content = message.content.toLowerCase()
@@ -26,6 +41,25 @@ export class FallbackProvider implements LLMProvider {
         emotionalImpact: this.determineEmotionalImpact(content),
         tags: this.generateTags(content),
       })
+
+      // Extract entities (simple heuristic-based extraction)
+      const extractedEntities = this.extractEntities(message.content)
+      for (const entity of extractedEntities) {
+        if (!entities.some(e => e.name.toLowerCase() === entity.name.toLowerCase())) {
+          entities.push(entity)
+        }
+      }
+
+      // Create entity relations
+      for (const entity of extractedEntities) {
+        entityRelations.push({
+          entityName: entity.name,
+          memoryContent: message.content,
+          importance: this.determineImportance(content),
+          relationshipType: 'mentioned',
+          confidence: 6,
+        })
+      }
 
       // Extract goals
       if (content.includes('goal') || content.includes('plan') || content.includes('want to') || content.includes('need to')) {
@@ -48,7 +82,35 @@ export class FallbackProvider implements LLMProvider {
       }
     }
 
-    return { memoryFragments, goals, ideas }
+    // Create consolidated memories if we have multiple related fragments
+    if (memoryFragments.length > 1) {
+      const relatedFragments = memoryFragments.filter(f =>
+        f.category === memoryFragments[0].category
+        || f.importance >= 7,
+      )
+
+      if (relatedFragments.length > 1) {
+        consolidatedMemories.push({
+          content: `Summary of ${relatedFragments.length} related ${memoryFragments[0].category} memories`,
+          summaryType: 'summary',
+          sourceFragmentContents: relatedFragments.map(f => f.content),
+          metadata: {
+            category: memoryFragments[0].category,
+            fragmentCount: relatedFragments.length,
+          },
+        })
+      }
+    }
+
+    return {
+      memoryFragments,
+      goals,
+      ideas,
+      episodes,
+      entities,
+      entityRelations,
+      consolidatedMemories,
+    }
   }
 
   private determineMemoryType(content: string): 'working' | 'short_term' | 'long_term' | 'muscle' {
@@ -128,5 +190,38 @@ export class FallbackProvider implements LLMProvider {
     if (content.includes('friend'))
       tags.push('friend')
     return tags
+  }
+
+  private extractEntities(content: string): Array<{ name: string, entityType: 'person' | 'place' | 'organization' | 'concept' | 'thing' }> {
+    const entities: Array<{ name: string, entityType: 'person' | 'place' | 'organization' | 'concept' | 'thing' }> = []
+
+    // Simple heuristic-based entity extraction
+    const words = content.split(/\s+/)
+
+    for (const word of words) {
+      const cleanWord = word.replace(/\W/g, '')
+
+      // Skip short words and common words
+      if (cleanWord.length < 3 || ['the', 'and', 'but', 'for', 'are', 'was', 'were', 'have', 'has', 'had', 'will', 'would', 'could', 'should'].includes(cleanWord.toLowerCase())) {
+        continue
+      }
+
+      // Capitalized words might be names/places
+      if (cleanWord[0] === cleanWord[0]?.toUpperCase() && cleanWord.length > 2) {
+        if (cleanWord.length > 4) {
+          entities.push({ name: cleanWord, entityType: 'person' })
+        }
+        else {
+          entities.push({ name: cleanWord, entityType: 'place' })
+        }
+      }
+
+      // Specific entity patterns
+      if (cleanWord.toLowerCase().includes('company') || cleanWord.toLowerCase().includes('corp') || cleanWord.toLowerCase().includes('inc')) {
+        entities.push({ name: cleanWord, entityType: 'organization' })
+      }
+    }
+
+    return entities
   }
 }

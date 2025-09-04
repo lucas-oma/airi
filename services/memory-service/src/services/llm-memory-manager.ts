@@ -4,6 +4,7 @@
  * This service handles:
  * - Processing batches of messages with LLM
  * - Creating memory fragments, goals, ideas, etc.
+ * - Creating episodes, entities, and consolidated memories
  * - Updating memory tables with structured data
  */
 
@@ -16,6 +17,10 @@ import { inArray } from 'drizzle-orm'
 
 import { useDrizzle } from '../db/index.js'
 import {
+  memoryConsolidatedMemoriesTable,
+  memoryEntitiesTable,
+  memoryEntityRelationsTable,
+  memoryEpisodesTable,
   memoryFragmentsTable,
   memoryLongTermGoalsTable,
   memoryShortTermIdeasTable,
@@ -46,6 +51,36 @@ export interface StructuredLLMResponse {
     sourceType: 'conversation' | 'reflection' | 'dream'
     excitement: number
     status: 'new' | 'developing' | 'implemented' | 'abandoned'
+  }[]
+  // NEW: Episode detection and grouping
+  episodes: {
+    episodeType: 'chat_session' | 'dream' | 'meditation' | 'conversation' | 'event' | 'reflection'
+    title: string
+    startTime?: number
+    endTime?: number
+    metadata?: Record<string, any>
+  }[]
+  // NEW: Entity extraction and knowledge
+  entities: {
+    name: string
+    entityType: 'person' | 'place' | 'organization' | 'concept' | 'thing'
+    description?: string
+    metadata?: Record<string, any>
+  }[]
+  // NEW: Entity-memory relationships
+  entityRelations: {
+    entityName: string
+    memoryContent: string // Reference to memory fragment content
+    importance: number // 1-10 scale
+    relationshipType: 'mentioned' | 'acted' | 'experienced' | 'created' | 'visited' | 'discussed'
+    confidence: number // 1-10 scale
+  }[]
+  // NEW: Memory consolidation opportunities
+  consolidatedMemories: {
+    content: string
+    summaryType: 'summary' | 'insight' | 'lesson' | 'narrative' | 'pattern'
+    sourceFragmentContents: string[] // Array of memory fragment contents to link
+    metadata?: Record<string, any>
   }[]
   // The LLM can also infer and return associations between new and existing memories.
   // TODO: This is a placeholder for that advanced logic.
@@ -105,6 +140,10 @@ export class LLMMemoryManager {
     // console.log(`🔍 Processing ${structuredData.memoryFragments.length} memory fragments`)
     // console.log(`🏷️ Processing ${structuredData.goals.length} goals`)
     // console.log(`💡 Processing ${structuredData.ideas.length} ideas`)
+    // console.log(`📅 Processing ${structuredData.episodes?.length || 0} episodes`)
+    // console.log(`👥 Processing ${structuredData.entities?.length || 0} entities`)
+    // console.log(`🔗 Processing ${structuredData.entityRelations?.length || 0} entity relations`)
+    // console.log(`📚 Processing ${structuredData.consolidatedMemories?.length || 0} consolidated memories`)
 
     const memoryFragments = structuredData.memoryFragments.map(f => ({
       ...f,
@@ -114,6 +153,8 @@ export class LLMMemoryManager {
       created_at: Date.now(),
       last_accessed: Date.now(),
       metadata: {},
+      // Link to episode if one was detected for this batch
+      episode_id: undefined as string | undefined, // Will be set after episode creation
     }))
 
     const tagsToCreate = new Set(structuredData.memoryFragments.flatMap(f => f.tags))
@@ -171,10 +212,64 @@ export class LLMMemoryManager {
       updated_at: Date.now(),
     }))
 
+    // Prepare episodes for insertion
+    const episodes = (structuredData.episodes || []).map(e => ({
+      episode_type: e.episodeType,
+      title: e.title,
+      start_time: e.startTime || Date.now(),
+      end_time: e.endTime,
+      is_processed: false,
+      metadata: e.metadata || {},
+    }))
+
+    // Prepare entities for insertion
+    const entities = (structuredData.entities || []).map(e => ({
+      name: e.name,
+      entity_type: e.entityType,
+      description: e.description,
+      metadata: e.metadata || {},
+    }))
+
+    // Prepare consolidated memories for insertion
+    const consolidatedMemories = (structuredData.consolidatedMemories || []).map(c => ({
+      content: c.content,
+      summary_type: c.summaryType,
+      source_fragment_ids: '[]' as string, // Will be populated after fragments are created
+      source_episode_ids: '[]' as string, // Will be populated after episodes are created
+      metadata: c.metadata || {},
+      created_at: Date.now(),
+      last_accessed: Date.now(),
+      // Note: content_vector fields will be populated by embedding service
+    }))
+
     // console.log(`💾 Starting database transaction...`)
     await this.db.transaction(async (tx) => {
+      // Create episodes first (if any)
+      let createdEpisodeId: string | undefined
+      if (episodes.length > 0) {
+        // console.log(`📅 Inserting ${episodes.length} episodes...`)
+        const createdEpisodes = await tx.insert(memoryEpisodesTable).values(episodes).returning({ id: memoryEpisodesTable.id })
+        createdEpisodeId = createdEpisodes[0]?.id
+        // console.log(`✅ Episodes inserted`)
+      }
+
+      // Create entities (if any)
+      let createdEntities: Array<{ id: string, name: string }> = []
+      if (entities.length > 0) {
+        // console.log(`👥 Inserting ${entities.length} entities...`)
+        createdEntities = await tx.insert(memoryEntitiesTable).values(entities).returning({ id: memoryEntitiesTable.id, name: memoryEntitiesTable.name })
+        // console.log(`✅ Entities inserted`)
+      }
+
       // Create fragments in bulk and then tag relations for the created fragments
       if (memoryFragments.length > 0) {
+        // Link fragments to episode if one was created
+        if (createdEpisodeId) {
+          memoryFragments.forEach((f) => {
+            f.episode_id = createdEpisodeId
+          })
+        }
+
         // console.log(`📝 Inserting ${memoryFragments.length} memory fragments...`)
         const createdFragments = await tx.insert(memoryFragmentsTable).values(memoryFragments).returning({ id: memoryFragmentsTable.id })
         // console.log(`✅ Memory fragments inserted`)
@@ -198,6 +293,58 @@ export class LLMMemoryManager {
           // console.log(`🔗 Inserting ${tagRelations.length} tag relations...`)
           await tx.insert(memoryTagRelationsTable).values(tagRelations)
           // console.log(`✅ Tag relations inserted`)
+        }
+
+        // Build entity relations if we have entities and entity relations data
+        if (createdEntities.length > 0 && structuredData.entityRelations) {
+          const entityMap = new Map(createdEntities.map(e => [e.name, e.id]))
+          const fragmentMap = new Map(createdFragments.map((f, i) => [structuredData.memoryFragments[i]?.content, f.id]))
+
+          const entityRelations: Array<{
+            memory_id: string
+            entity_id: string
+            importance: number
+            relationship_type: string
+            confidence: number
+            created_at: number
+          }> = []
+
+          for (const relation of structuredData.entityRelations) {
+            const entityId = entityMap.get(relation.entityName)
+            const memoryId = fragmentMap.get(relation.memoryContent)
+
+            if (entityId && memoryId) {
+              entityRelations.push({
+                memory_id: memoryId,
+                entity_id: entityId,
+                importance: relation.importance,
+                relationship_type: relation.relationshipType,
+                confidence: relation.confidence,
+                created_at: Date.now(),
+              })
+            }
+          }
+
+          if (entityRelations.length > 0) {
+            // console.log(`🔗 Inserting ${entityRelations.length} entity relations...`)
+            await tx.insert(memoryEntityRelationsTable).values(entityRelations)
+            // console.log(`✅ Entity relations inserted`)
+          }
+        }
+
+        // Update consolidated memories with fragment IDs
+        if (consolidatedMemories.length > 0) {
+          const fragmentIds = createdFragments.map(f => f.id)
+          const episodeIds = createdEpisodeId ? [createdEpisodeId] : []
+
+          consolidatedMemories.forEach((cm) => {
+            cm.source_fragment_ids = JSON.stringify(fragmentIds)
+            cm.source_episode_ids = JSON.stringify(episodeIds)
+          })
+
+          // console.log(`📚 Inserting ${consolidatedMemories.length} consolidated memories...`)
+          await tx.insert(memoryConsolidatedMemoriesTable).values(consolidatedMemories)
+          // console.log(`✅ Consolidated memories inserted`)
         }
       }
 
