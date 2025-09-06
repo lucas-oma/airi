@@ -9,28 +9,54 @@
  * - CORS and security headers
  */
 
-import type { MessageIngestionService } from '../services/message-processing.js'
+import { env } from 'node:process'
 
 import cors from 'cors'
 import express from 'express'
 
-import { MemoryService } from '../services/memory.js'
+import { MemoryService } from '../services/memory'
+import { SettingsService } from '../services/settings'
 
-export function createApp(messageIngestionService: MessageIngestionService) {
+// Simple authentication middleware
+function authenticateApiKey(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const authHeader = req.headers.authorization
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'API key required' })
+  }
+
+  const apiKey = authHeader.split(' ')[1]
+  if (apiKey !== env.API_KEY) {
+    return res.status(403).json({ error: 'Invalid API key' })
+  }
+
+  next()
+}
+
+export function createApp() {
   const app = express()
-  const memoryService = new MemoryService(messageIngestionService)
+  const memoryService = new MemoryService()
+  const settingsService = SettingsService.getInstance()
 
   // Middleware
   app.use(cors())
   app.use(express.json())
 
-  // Health check endpoint
+  // Health check endpoint (no auth required)
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() })
   })
 
+  // Test authentication endpoint
+  app.get('/api/test-auth', authenticateApiKey, (req, res) => {
+    res.json({
+      status: 'authenticated',
+      timestamp: new Date().toISOString(),
+      message: 'API key is valid',
+    })
+  })
+
   // Message ingestion endpoint
-  app.post('/api/messages', async (req, res) => {
+  app.post('/api/messages', authenticateApiKey, async (req, res) => {
     try {
       const result = await memoryService.ingestMessage(req.body)
       res.json(result)
@@ -44,8 +70,8 @@ export function createApp(messageIngestionService: MessageIngestionService) {
     }
   })
 
-  // Chat completions endpoint
-  app.post('/api/completions', async (req, res) => {
+  // Store AI completion endpoint
+  app.post('/api/completions', authenticateApiKey, async (req, res) => {
     try {
       const result = await memoryService.storeCompletion(req.body)
       res.json(result)
@@ -59,20 +85,127 @@ export function createApp(messageIngestionService: MessageIngestionService) {
     }
   })
 
-  // Get message by ID endpoint
-  app.get('/api/messages/:id', async (req, res) => {
+  // Update memory service settings
+  app.post('/api/settings', authenticateApiKey, async (req, res) => {
     try {
-      const result = await memoryService.getMessage(req.params.id)
-      if (!result) {
-        res.status(404).json({ error: 'Message not found' })
-        return
+      const {
+        // LLM settings
+        llmProvider,
+        llmModel,
+        llmApiKey,
+        llmTemperature,
+        llmMaxTokens,
+        // Embedding settings
+        embeddingProvider,
+        embeddingModel,
+        embeddingApiKey,
+        embeddingDimensions,
+      } = req.body
+
+      // Get current settings to compare
+      const currentSettings = await settingsService.getSettings()
+
+      // Check if embeddings are being regenerated
+      if (currentSettings.mem_is_regenerating && (
+        currentSettings.mem_embedding_provider !== embeddingProvider
+        || currentSettings.mem_embedding_model !== embeddingModel
+        || currentSettings.mem_embedding_dimensions !== embeddingDimensions
+      )) {
+        return res.status(409).json({
+          error: 'Cannot change embedding settings while regeneration is in progress',
+          details: 'Please wait for the current regeneration to complete',
+        })
       }
-      res.json(result)
+
+      // Update settings first
+      await settingsService.updateSettings({
+        // LLM settings
+        mem_llm_provider: llmProvider,
+        mem_llm_model: llmModel,
+        mem_llm_api_key: llmApiKey,
+        mem_llm_temperature: llmTemperature,
+        mem_llm_max_tokens: llmMaxTokens,
+        // Embedding settings
+        mem_embedding_provider: embeddingProvider,
+        mem_embedding_model: embeddingModel,
+        mem_embedding_api_key: embeddingApiKey,
+        mem_embedding_dimensions: embeddingDimensions,
+      })
+
+      // Only trigger regeneration if embedding-related settings changed AND not already regenerating
+      if (
+        !currentSettings.mem_is_regenerating && (
+          currentSettings.mem_embedding_provider !== embeddingProvider
+          || currentSettings.mem_embedding_model !== embeddingModel
+          || currentSettings.mem_embedding_dimensions !== embeddingDimensions
+        )
+      ) {
+        // Set regenerating state
+        await settingsService.updateSettings({
+          mem_is_regenerating: true,
+        })
+
+        // Send response immediately
+        res.json({
+          status: 'success',
+          message: 'Settings updated successfully. Embedding regeneration started in background.',
+          isRegenerating: true,
+        })
+
+        // Process in background
+        try {
+          // This will process everything in parallel but wait for completion
+          await memoryService.triggerEmbeddingRegeneration()
+        }
+        finally {
+          // Always clear regenerating state
+          await settingsService.updateSettings({
+            mem_is_regenerating: false,
+          })
+        }
+        return // Already sent response
+      }
+
+      // If no regeneration needed, respond normally
+      res.json({
+        status: 'success',
+        message: 'Settings updated successfully',
+      })
     }
     catch (error) {
-      console.error('Failed to get message:', error)
+      console.error('Failed to update settings:', error)
       res.status(500).json({
-        error: 'Failed to get message',
+        error: 'Failed to update settings',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      })
+    }
+  })
+
+  // Get regeneration status endpoint
+  app.get('/api/settings/regeneration-status', authenticateApiKey, async (req, res) => {
+    try {
+      const settings = await settingsService.getSettings()
+
+      res.json({
+        isRegenerating: settings.mem_is_regenerating,
+        progress: settings.mem_regeneration_progress,
+        totalItems: settings.mem_regeneration_total_items,
+        processedItems: settings.mem_regeneration_processed_items,
+        avgBatchTimeMs: settings.mem_regeneration_avg_batch_time_ms,
+        lastBatchTimeMs: settings.mem_regeneration_last_batch_time_ms,
+        currentBatchSize: settings.mem_regeneration_current_batch_size,
+        estimatedTimeRemaining: settings.mem_regeneration_total_items > 0
+          ? Math.round(
+              (settings.mem_regeneration_total_items - settings.mem_regeneration_processed_items)
+              * (settings.mem_regeneration_avg_batch_time_ms / settings.mem_regeneration_current_batch_size),
+            )
+          : null,
+      })
+    }
+    catch (error) {
+      console.error('Failed to get regeneration status:', error)
+      res.status(500).json({
+        error: 'Failed to get regeneration status',
         details: error instanceof Error ? error.message : 'Unknown error',
       })
     }

@@ -257,3 +257,37 @@ export const memoryConsolidatedMemoriesTable = pgTable('memory_consolidated_memo
   index('memory_consolidated_memories_created_at_index').on(table.created_at),
   index('memory_consolidated_memories_last_accessed_index').on(table.last_accessed),
 ])
+
+// Settings table - for storing LLM and embedding configuration
+export const memorySettingsTable = pgTable('memory_settings', {
+  id: uuid().primaryKey().defaultRandom(),
+  // LLM Settings
+  mem_llm_provider: text().notNull().default('openai'),
+  mem_llm_model: text().notNull().default('gpt-3.5-turbo'),
+  mem_llm_api_key: text().notNull(),
+  mem_llm_temperature: integer().notNull().default(7), // 0-10 scale, divide by 10 for actual temp
+  mem_llm_max_tokens: integer().notNull().default(2000),
+
+  // Embedding Settings
+  mem_embedding_provider: text().notNull().default('openai'),
+  mem_embedding_model: text().notNull().default('text-embedding-3-small'),
+  mem_embedding_api_key: text().notNull(),
+  mem_embedding_dimensions: integer().notNull().default(1536),
+
+  // Regeneration State
+  mem_is_regenerating: boolean().notNull().default(false),
+  mem_regeneration_progress: integer().notNull().default(0), // 0-100 percentage
+  mem_regeneration_total_items: integer().notNull().default(0),
+  mem_regeneration_processed_items: integer().notNull().default(0),
+  mem_regeneration_avg_batch_time_ms: integer().notNull().default(0), // For dynamic batch sizing
+  mem_regeneration_last_batch_time_ms: integer().notNull().default(0), // For trend analysis
+  mem_regeneration_current_batch_size: integer().notNull().default(50), // Current dynamic batch size
+
+  created_at: bigint({ mode: 'number' }).notNull().default(0).$defaultFn(() => Date.now()),
+  updated_at: bigint({ mode: 'number' }).notNull().default(0).$defaultFn(() => Date.now()),
+}, table => [
+  // No need for key/type indexes anymore since each setting is a column
+  // Add indexes for frequently queried settings if needed
+  index('memory_settings_llm_provider_index').on(table.mem_llm_provider),
+  index('memory_settings_embedding_provider_index').on(table.mem_embedding_provider),
+])

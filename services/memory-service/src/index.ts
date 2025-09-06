@@ -59,7 +59,7 @@ async function main() {
   const messageIngestionService = MessageIngestionService.getInstance()
 
   // Create REST API server with shared message ingestion service
-  const app = createApp(messageIngestionService)
+  const app = createApp()
 
   // Start background processing with shared message ingestion service (singleton)
   const backgroundTrigger = BackgroundTrigger.getInstance(messageIngestionService)
