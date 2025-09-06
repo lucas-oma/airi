@@ -24,6 +24,7 @@ import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic
 // Import API server
 import { createApp } from './api/server.js'
 import { BackgroundTrigger } from './services/background-trigger.js'
+import { MemoryService } from './services/memory.js'
 import { MessageIngestionService } from './services/message-processing.js'
 
 // TODO [lucas-oma]: Import WebSocket server
@@ -52,15 +53,15 @@ async function main() {
 
   sdk.start()
 
-  // TODO [lucas-oma]: Initialize database connection
-  // await initDb()
-
   // Get shared message ingestion service singleton
   const messageIngestionService = MessageIngestionService.getInstance()
 
   // Create REST API server with shared message ingestion service
   const app = createApp()
 
+  // Check for incomplete regeneration
+  const memoryService = new MemoryService()
+  await memoryService.checkAndResumeRegeneration()
   // Start background processing with shared message ingestion service (singleton)
   const backgroundTrigger = BackgroundTrigger.getInstance(messageIngestionService)
   backgroundTrigger.startProcessing(30000) // Process every 30 seconds
