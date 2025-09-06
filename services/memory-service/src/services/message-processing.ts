@@ -90,6 +90,10 @@ export class MessageIngestionService {
       // console.log(`✅ Marked ${messageIds.length} messages as processed`)
     }
     catch (error) {
+      if (error instanceof Error && error.message.includes('relation "chat_messages" does not exist')) {
+        console.warn('Chat messages table does not exist yet, skipping message processing')
+        return
+      }
       console.error('Failed to mark messages as processed:', error)
       throw error
     }
