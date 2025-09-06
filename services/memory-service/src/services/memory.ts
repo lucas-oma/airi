@@ -99,6 +99,7 @@ export class MemoryService {
     })
 
     // Broadcast status update
+    // TODO [lucas-oma]: might remove this:
     await broadcastRegenerationStatus(this.settingsService)
   }
 
