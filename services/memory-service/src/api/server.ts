@@ -208,36 +208,37 @@ export function createApp() {
         error: 'Failed to get regeneration status',
         details: error instanceof Error ? error.message : 'Unknown error',
       })
-      // Get context for a message
-      app.post('/api/context', authenticateApiKey, async (req, res) => {
-        try {
-          const { message } = req.body
-          if (!message) {
-            return res.status(400).json({ error: 'message is required' })
-          }
+    }
+  })
 
-          // Store the message first so it's included in context building
-          await memoryService.ingestMessage({
-            content: message,
-            platform: 'web',
-          })
+  // Get context for a message
+  app.post('/api/context', authenticateApiKey, async (req, res) => {
+    try {
+      const { message } = req.body
+      if (!message) {
+        return res.status(400).json({ error: 'message is required' })
+      }
 
-          // Build context using ContextBuilder
-          const context = await memoryService.buildQueryContext(message)
+      // Store the message first so it's included in context building
+      await memoryService.ingestMessage({
+        content: message,
+        platform: 'web',
+      })
 
-          // console.log('========== Context ================================')
-          // console.log('Context:', JSON.stringify(context, null, 2))
-          // console.log('===================================================')
+      // Build context using ContextBuilder
+      const context = await memoryService.buildQueryContext(message)
 
-          res.json(context)
-        }
-        catch (error) {
-          console.error('Failed to build context:', error)
-          res.status(500).json({
-            error: 'Failed to build context',
-            details: error instanceof Error ? error.message : 'Unknown error',
-          })
-        }
+      // console.log('========== Context ================================')
+      // console.log('Context:', JSON.stringify(context, null, 2))
+      // console.log('===================================================')
+
+      res.json(context)
+    }
+    catch (error) {
+      console.error('Failed to build context:', error)
+      res.status(500).json({
+        error: 'Failed to build context',
+        details: error instanceof Error ? error.message : 'Unknown error',
       })
     }
   })
