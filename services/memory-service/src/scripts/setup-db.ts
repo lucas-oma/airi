@@ -1,7 +1,5 @@
 import { execSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { join } from 'node:path'
-import { cwd, exit } from 'node:process'
+import { exit } from 'node:process'
 
 import { config } from 'dotenv'
 
@@ -26,21 +24,15 @@ async function setupDatabase() {
       exit(1)
     }
 
-    // Step 1.5: Generate migrations if they don't exist
-    const drizzleDir = join(cwd(), 'drizzle')
-    if (!existsSync(drizzleDir)) {
-      console.log('\n1.5️⃣ Generating migration files...')
-      try {
-        execSync('pnpm db:generate', { stdio: 'inherit' })
-        console.log('✅ Migration files generated')
-      }
-      catch (error) {
-        console.error('❌ Failed to generate migrations:', error)
-        exit(1)
-      }
+    // Step 1.5: Generate fresh migrations
+    console.log('\n1.5️⃣ Generating migration files...')
+    try {
+      execSync('pnpm db:generate', { stdio: 'inherit' })
+      console.log('✅ Migration files generated')
     }
-    else {
-      console.log('\n1.5️⃣ Migration files already exist, skipping generation')
+    catch (error) {
+      console.error('❌ Failed to generate migrations:', error)
+      exit(1)
     }
 
     // Step 2: Run migrations
