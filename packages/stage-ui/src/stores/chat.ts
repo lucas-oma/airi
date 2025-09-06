@@ -24,7 +24,7 @@ export interface ErrorMessage {
 export const useChatStore = defineStore('chat', () => {
   const { stream, discoverToolsCompatibility } = useLLM()
   const { systemPrompt } = storeToRefs(useAiriCardStore())
-  const { storeUserMessage, storeAIResponse } = useMemoryService()
+  const { storeAIResponse, memoryServiceEnabled } = useMemoryService()
 
   const sending = ref(false)
 
@@ -83,16 +83,14 @@ export const useChatStore = defineStore('chat', () => {
   const streamingMessage = ref<ChatAssistantMessage>({ role: 'assistant', content: '', slices: [], tool_results: [] })
 
   // Dedupe guard to prevent duplicate storage calls
-  const DEDUPE_WINDOW_MS = 80
+  const DEDUPE_WINDOW_MS = 100
   const DEDUPE_STORAGE_KEY = 'airi-chat-last-message'
 
   function shouldSkipStorage(message: string): boolean {
     try {
-      // console.log(`Dedupe check for message: "${message.substring(0, 50)}..."`)
-
       const lastMessageData = localStorage.getItem(DEDUPE_STORAGE_KEY)
+
       if (!lastMessageData) {
-        // console.log(`No previous message found, allowing storage`)
         localStorage.setItem(DEDUPE_STORAGE_KEY, JSON.stringify({ message, timestamp: Date.now() }))
         return false
       }
@@ -101,16 +99,13 @@ export const useChatStore = defineStore('chat', () => {
       const now = Date.now()
       const timeDiff = now - timestamp
 
-      // console.log(`Last message: "${lastMessage.substring(0, 50)}..." (${timeDiff}ms ago)`)
-
       // Skip if same message and within dedupe window
       if (message === lastMessage && timeDiff < DEDUPE_WINDOW_MS) {
-        // console.log(`Skipping duplicate message storage: "${message.substring(0, 50)}..." (${timeDiff}ms ago)`)
+        // console.log('Dedup check - Skipping duplicate message')
         return true
       }
 
       // Update with current message
-      // console.log(`Updating stored message, allowing storage`)
       localStorage.setItem(DEDUPE_STORAGE_KEY, JSON.stringify({ message, timestamp: now }))
       return false
     }
@@ -157,17 +152,6 @@ export const useChatStore = defineStore('chat', () => {
       const finalContent = contentParts.length > 1 ? contentParts : sendingMessage
 
       messages.value.push({ role: 'user', content: finalContent })
-
-      // Async: Store user message in memory service (fire and forget)
-      if (!shouldSkipStorage(sendingMessage)) {
-        // console.log(`Storing user message: "${sendingMessage.substring(0, 50)}..."`)
-        storeUserMessage(sendingMessage, 'web').catch((error) => {
-          console.warn('Memory storage failed:', error)
-        })
-      }
-      else {
-        // console.log(`Skipped storing user message due to dedupe`)
-      }
 
       const parser = useLlmmarkerParser({
         onLiteral: async (literal) => {
@@ -282,14 +266,28 @@ export const useChatStore = defineStore('chat', () => {
               await hook(fullText)
 
             // Async: Store AI response in memory service (fire and forget)
-            if (!shouldSkipStorage(sendingMessage)) {
-              // console.log(`Storing AI response: "${sendingMessage.substring(0, 50)}..."`)
-              storeAIResponse(sendingMessage, fullText, 'web').catch((error) => {
+            if (memoryServiceEnabled?.value && !shouldSkipStorage(sendingMessage)) {
+              // Format the full prompt
+              const fullPrompt = newMessages.map(msg =>
+                `${msg.role.toUpperCase()}: ${typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)}`,
+              ).join('\n\n')
+
+              // Store the completion and update localStorage
+              try {
+                await storeAIResponse(fullPrompt, fullText, 'web')
+                // console.log('Storing completion - Success, updating localStorage')
+                // Update localStorage after successful storage
+                localStorage.setItem(DEDUPE_STORAGE_KEY, JSON.stringify({
+                  message: sendingMessage,
+                  timestamp: Date.now(),
+                }))
+              }
+              catch (error) {
                 console.warn('Memory storage failed:', error)
-              })
+              }
             }
             else {
-              // console.log(`Skipped storing AI response due to dedupe`)
+              // console.log('Storing completion - Skipped due to dedup')
             }
 
             // console.debug('LLM output:', fullText)

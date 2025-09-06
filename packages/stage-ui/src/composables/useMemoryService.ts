@@ -23,6 +23,8 @@ export function useMemoryService() {
 
   /**
    * Store a user message in the memory service
+   * NOTE: Currently not used as messages are stored via /api/context when building context.
+   * Keeping this for future streaming service implementation.
    */
   async function storeUserMessage(content: string, platform: string = 'web') {
     try {
