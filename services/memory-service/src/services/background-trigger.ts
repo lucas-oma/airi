@@ -9,6 +9,7 @@
 
 // TODO [lucas-oma]: remove console.log comments
 
+import type { BuiltContext } from './context-builder'
 import type { MessageIngestionService } from './message-processing.js'
 
 import { asc, inArray } from 'drizzle-orm'
@@ -20,6 +21,7 @@ import { LLMMemoryManager } from './llm-memory-manager.js'
 export interface ProcessingBatch {
   messageIds: string[]
   messages: any[]
+  context?: BuiltContext // Optional context for the batch (only used when user sends a message)
 }
 
 export class BackgroundTrigger {

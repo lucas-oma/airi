@@ -19,6 +19,7 @@ import {
   memoryShortTermIdeasTable,
 } from '../db/schema'
 import { broadcastRegenerationStatus } from '../utils/broadcast'
+import { ContextBuilder } from './context-builder'
 import { EmbeddingProviderFactory } from './embedding-providers/factory'
 import { SettingsService } from './settings'
 
@@ -60,6 +61,7 @@ export class MemoryService {
   private db = useDrizzle()
   private embeddingFactory = EmbeddingProviderFactory.getInstance()
   private settingsService = SettingsService.getInstance()
+  private contextBuilder = new ContextBuilder()
 
   // Constants for batch size adjustment
   private readonly MIN_BATCH_SIZE = 10
@@ -406,6 +408,19 @@ export class MemoryService {
     catch (error) {
       console.error('Failed to store completion:', error)
       throw new Error(`Failed to store completion: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
+  }
+
+  /**
+   * Build context for a query using the context builder
+   */
+  async buildQueryContext(query: string) {
+    try {
+      return await this.contextBuilder.buildContext(query)
+    }
+    catch (error) {
+      console.error('Failed to build context:', error)
+      return null
     }
   }
 
