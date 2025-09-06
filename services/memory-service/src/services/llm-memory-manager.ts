@@ -11,9 +11,8 @@
 // TODO [lucas-oma]: remove console.log comments
 
 import type { ProcessingBatch } from './background-trigger.js'
-import type { LLMProvider } from './llm-providers/base.js'
 
-import { inArray } from 'drizzle-orm'
+import { inArray, sql } from 'drizzle-orm'
 
 import { useDrizzle } from '../db/index.js'
 import {
@@ -27,6 +26,7 @@ import {
   memoryTagRelationsTable,
   memoryTagsTable,
 } from '../db/schema.js'
+import { EmbeddingProviderFactory } from './embedding-providers/factory.js'
 import { LLMProviderFactory } from './llm-providers/factory.js'
 
 // NOTE: This interface defines the structured JSON output we expect from the LLM.
@@ -89,43 +89,41 @@ export interface StructuredLLMResponse {
 
 export class LLMMemoryManager {
   private db = useDrizzle()
-  private llmProvider: LLMProvider
+  private llmProviderFactory = LLMProviderFactory.getInstance()
+  private embeddingFactory = EmbeddingProviderFactory.getInstance()
 
-  constructor() {
-    this.llmProvider = LLMProviderFactory.createProvider()
+  private async generateEmbeddings(content: string): Promise<{
+    content_vector_1536: number[] | null
+    content_vector_1024: number[] | null
+    content_vector_768: number[] | null
+  }> {
+    return await this.embeddingFactory.generateEmbedding(content)
   }
 
   /**
    * Processes an entire batch of messages with a single, structured LLM call.
    */
   async processBatch(batch: ProcessingBatch): Promise<void> {
-    // console.log(`🚀 LLM Memory Manager processing batch of ${batch.messages.length} messages`)
-    // console.log(`🆔 Batch ID: ${Date.now()}-${Math.random().toString(36).substr(2, 9)}`)
-    // console.log(`📋 Message IDs: ${batch.messageIds.join(', ')}`)
-    // console.log(`📝 Message contents: ${batch.messages.map(m => m.content.substring(0, 50)).join(' | ')}`)
-
     // Skip processing if batch is empty
     if (batch.messages.length === 0) {
-      // console.log('Skipping empty batch')
       return
     }
 
     try {
-      // console.log(`💰 Making LLM API call for batch...`)
-      // const startTime = Date.now()
+      // Get LLM provider
+      const llmProvider = await this.llmProviderFactory.getProvider()
 
-      // 1. Get a single, structured JSON response from the LLM for the entire batch.
-      const structuredData = await this.llmProvider.processBatch(batch)
+      // Process batch
+      const response = await llmProvider.processBatch({
+        messageIds: batch.messageIds,
+        messages: batch.messages,
+      })
 
-      // const endTime = Date.now()
-      // console.log(`✅ LLM API call completed in ${endTime - startTime}ms`)
-      // console.log(`📊 LLM Response: ${JSON.stringify(structuredData).substring(0, 200)}...`)
+      // Store the structured data
+      await this.updateMemoryTables(response)
 
-      // 2. Perform all database operations in a single transaction for efficiency.
-      // console.log(`💾 Updating memory tables...`)
-      await this.updateMemoryTables(structuredData)
-
-      // console.log(`🎯 Successfully processed batch and updated memory tables.`)
+      // Mark messages as processed
+      // await this.messageIngestion.markMessagesAsProcessed(batch.messageIds) // This line was not in the new_code, so it's removed.
     }
     catch (error) {
       console.error('❌ An error occurred during batch processing:', error)
@@ -254,15 +252,42 @@ export class LLMMemoryManager {
       }
 
       // Create entities (if any)
-      let createdEntities: Array<{ id: string, name: string }> = []
+      const createdEntities: Array<{ id: string, name: string }> = []
       if (entities.length > 0) {
         // console.log(`👥 Inserting ${entities.length} entities...`)
-        createdEntities = await tx.insert(memoryEntitiesTable).values(entities).returning({ id: memoryEntitiesTable.id, name: memoryEntitiesTable.name })
-        // console.log(`✅ Entities inserted`)
+        for (const entity of entities) {
+          const [result] = await tx
+            .insert(memoryEntitiesTable)
+            .values(entity)
+            .onConflictDoUpdate({
+              target: memoryEntitiesTable.name,
+              set: {
+                description: sql`CASE 
+                  WHEN length(EXCLUDED.description) > length(${memoryEntitiesTable.description}) 
+                  THEN EXCLUDED.description 
+                  ELSE ${memoryEntitiesTable.description}
+                END`,
+                metadata: sql`${memoryEntitiesTable.metadata} || EXCLUDED.metadata`,
+              },
+            })
+            .returning({ id: memoryEntitiesTable.id, name: memoryEntitiesTable.name })
+          createdEntities.push(result)
+        }
+        // console.log(`✅ Entities inserted/updated`)
       }
 
       // Create fragments in bulk and then tag relations for the created fragments
       if (memoryFragments.length > 0) {
+        // Generate embeddings for all fragments
+        const fragmentEmbeddings = await Promise.all(
+          memoryFragments.map(f => this.generateEmbeddings(f.content)),
+        )
+
+        // Add embeddings to fragments
+        memoryFragments.forEach((f, i) => {
+          Object.assign(f, fragmentEmbeddings[i])
+        })
+
         // Link fragments to episode if one was created
         if (createdEpisodeId) {
           memoryFragments.forEach((f) => {
@@ -332,14 +357,17 @@ export class LLMMemoryManager {
           }
         }
 
-        // Update consolidated memories with fragment IDs
+        // Update consolidated memories with fragment IDs and embeddings
         if (consolidatedMemories.length > 0) {
-          const fragmentIds = createdFragments.map(f => f.id)
-          const episodeIds = createdEpisodeId ? [createdEpisodeId] : []
+          const consolidatedEmbeddings = await Promise.all(
+            consolidatedMemories.map(cm => this.generateEmbeddings(cm.content)),
+          )
 
-          consolidatedMemories.forEach((cm) => {
-            cm.source_fragment_ids = JSON.stringify(fragmentIds)
-            cm.source_episode_ids = JSON.stringify(episodeIds)
+          // Add embeddings and IDs to consolidated memories
+          consolidatedMemories.forEach((cm, i) => {
+            Object.assign(cm, consolidatedEmbeddings[i])
+            cm.source_fragment_ids = JSON.stringify(createdFragments.map(f => f.id))
+            cm.source_episode_ids = JSON.stringify(createdEpisodeId ? [createdEpisodeId] : [])
           })
 
           // console.log(`📚 Inserting ${consolidatedMemories.length} consolidated memories...`)
@@ -355,10 +383,20 @@ export class LLMMemoryManager {
         // console.log(`✅ Goals inserted`)
       }
 
-      // Create ideas in bulk
+      // Create ideas in bulk with embeddings
       if (ideas.length > 0) {
-        // console.log(`💭 Inserting ${ideas.length} ideas...`)
-        await tx.insert(memoryShortTermIdeasTable).values(ideas)
+        const ideaEmbeddings = await Promise.all(
+          ideas.map(i => this.generateEmbeddings(i.content)),
+        )
+
+        // Add embeddings to ideas
+        const ideasWithEmbeddings = ideas.map((idea, i) => ({
+          ...idea,
+          ...ideaEmbeddings[i],
+        }))
+
+        // console.log(`💭 Inserting ${ideasWithEmbeddings.length} ideas...`)
+        await tx.insert(memoryShortTermIdeasTable).values(ideasWithEmbeddings)
         // console.log(`✅ Ideas inserted`)
       }
     })
