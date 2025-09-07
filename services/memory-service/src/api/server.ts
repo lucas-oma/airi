@@ -14,6 +14,10 @@ import { env } from 'node:process'
 import cors from 'cors'
 import express from 'express'
 
+import { desc, sql } from 'drizzle-orm'
+
+import { useDrizzle } from '../db'
+import { chatCompletionsHistoryTable, chatMessagesTable } from '../db/schema'
 import { MemoryService } from '../services/memory'
 import { SettingsService } from '../services/settings'
 
@@ -238,6 +242,65 @@ export function createApp() {
       console.error('Failed to build context:', error)
       res.status(500).json({
         error: 'Failed to build context',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      })
+    }
+  })
+
+  // Get paginated conversation history
+  app.get('/api/conversations', authenticateApiKey, async (req, res) => {
+    try {
+      const db = useDrizzle()
+      const limit = Number.parseInt(req.query.limit as string) || 10
+      const before = Number.parseInt(req.query.before as string) || Date.now() // timestamp for pagination
+
+      // Get messages and completions before the timestamp
+      const [messages, completions] = await Promise.all([
+        // Get user messages
+        db.select({
+          id: chatMessagesTable.id,
+          content: chatMessagesTable.content,
+          platform: chatMessagesTable.platform,
+          created_at: chatMessagesTable.created_at,
+          type: sql<'user'>`'user'`.as('type'),
+        })
+          .from(chatMessagesTable)
+          .where(sql`${chatMessagesTable.created_at} < ${before}`)
+          .orderBy(desc(chatMessagesTable.created_at))
+          .limit(limit),
+
+        // Get AI completions
+        db.select({
+          id: chatCompletionsHistoryTable.id,
+          content: chatCompletionsHistoryTable.response,
+          task: chatCompletionsHistoryTable.task,
+          created_at: chatCompletionsHistoryTable.created_at,
+          type: sql<'assistant'>`'assistant'`.as('type'),
+        })
+          .from(chatCompletionsHistoryTable)
+          .where(sql`${chatCompletionsHistoryTable.created_at} < ${before}`)
+          .orderBy(desc(chatCompletionsHistoryTable.created_at))
+          .limit(limit),
+      ])
+
+      // Merge and sort by timestamp
+      const conversation = [...messages, ...completions]
+        .sort((a, b) => b.created_at - a.created_at)
+        .slice(0, limit)
+
+      // Get the earliest timestamp for next page
+      const earliestTimestamp = conversation[conversation.length - 1]?.created_at
+
+      res.json({
+        messages: conversation.reverse(), // revered to get chat-style order
+        hasMore: conversation.length === limit,
+        nextCursor: earliestTimestamp,
+      })
+    }
+    catch (error) {
+      console.error('Failed to fetch conversation history:', error)
+      res.status(500).json({
+        error: 'Failed to fetch conversation history',
         details: error instanceof Error ? error.message : 'Unknown error',
       })
     }

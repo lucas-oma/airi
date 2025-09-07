@@ -1,5 +1,5 @@
 import type { ChatProvider } from '@xsai-ext/shared-providers'
-import type { CommonContentPart, Message, SystemMessage } from '@xsai/shared-chat'
+import type { CommonContentPart, Message, SystemMessage, UserMessage } from '@xsai/shared-chat'
 
 import type { StreamEvent } from '../stores/llm'
 import type { ChatAssistantMessage, ChatMessage, ChatSlices } from '../types/chat'
@@ -9,6 +9,7 @@ import { ref, toRaw } from 'vue'
 
 import { useQueue } from '../composables'
 import { useLlmmarkerParser } from '../composables/llmmarkerParser'
+import { useConversationHistory } from '../composables/useConversationHistory'
 import { useMemoryService } from '../composables/useMemoryService'
 import { useLLM } from '../stores/llm'
 import { TTS_FLUSH_INSTRUCTION } from '../utils/tts'
@@ -25,8 +26,11 @@ export const useChatStore = defineStore('chat', () => {
   const { stream, discoverToolsCompatibility } = useLLM()
   const { systemPrompt } = storeToRefs(useAiriCardStore())
   const { storeAIResponse, memoryServiceEnabled } = useMemoryService()
+  const { loadHistory, isLoading: isLoadingHistory, hasMore: hasMoreHistory, error: historyError } = useConversationHistory()
 
   const sending = ref(false)
+  const loadingInitialHistory = ref(false)
+  const hasLoadedInitialHistory = ref(false)
 
   const onBeforeMessageComposedHooks = ref<Array<(message: string) => Promise<void>>>([])
   const onAfterMessageComposedHooks = ref<Array<(message: string) => Promise<void>>>([])
@@ -308,13 +312,107 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  // Load initial conversation history
+  async function loadInitialHistory(limit: number = 10) {
+    // Prevent the function from running more than once
+    if (hasLoadedInitialHistory.value) {
+      return
+    }
+
+    try {
+      loadingInitialHistory.value = true
+      const history = await loadHistory(limit)
+
+      // Convert history messages to chat format
+      const chatMessages = history.map((msg) => {
+        if (msg.type === 'assistant') {
+          return {
+            role: msg.type,
+            content: msg.content,
+            slices: [{ type: 'text', text: msg.content }] as ChatSlices[],
+            tool_results: [],
+            created_at: msg.created_at,
+          } as ChatAssistantMessage
+        }
+        else {
+          return {
+            role: msg.type,
+            content: msg.content,
+            created_at: msg.created_at,
+          } as UserMessage
+        }
+      })
+
+      // Add system message first
+      messages.value = [
+        {
+          role: 'system',
+          content: codeBlockSystemPrompt + mathSyntaxSystemPrompt + systemPrompt.value,
+        } as SystemMessage,
+        ...chatMessages,
+      ]
+
+      // Set the flag to true after the first successful load
+      hasLoadedInitialHistory.value = true
+    }
+    finally {
+      loadingInitialHistory.value = false
+    }
+  }
+
+  // Load more history when scrolling up
+  async function loadMoreHistory() {
+    if (!hasMoreHistory.value || isLoadingHistory.value)
+      return
+
+    const oldestMessage = messages.value
+      .filter(msg => msg.role !== 'system')
+      .sort((a, b) => ((a as any).created_at || 0) - ((b as any).created_at || 0))[0]
+
+    if (!(oldestMessage as any)?.created_at)
+      return
+
+    const history = await loadHistory(10, (oldestMessage as any).created_at)
+
+    // Convert and add to messages
+    const chatMessages = history.map((msg) => {
+      if (msg.type === 'assistant') {
+        return {
+          role: msg.type,
+          content: msg.content,
+          slices: [{ type: 'text', text: msg.content }] as ChatSlices[],
+          tool_results: [],
+          created_at: msg.created_at,
+        } as ChatAssistantMessage
+      }
+      else {
+        return {
+          role: msg.type,
+          content: msg.content,
+          created_at: msg.created_at,
+        } as UserMessage
+      }
+    })
+
+    messages.value = [
+      ...messages.value.filter(msg => msg.role === 'system'),
+      ...chatMessages,
+      ...messages.value.filter(msg => msg.role !== 'system'),
+    ]
+  }
+
   return {
     sending,
     messages,
     streamingMessage,
+    loadingInitialHistory,
+    isLoadingHistory,
+    hasMoreHistory,
+    historyError,
 
     discoverToolsCompatibility,
-
+    loadInitialHistory,
+    loadMoreHistory,
     send,
 
     onBeforeMessageComposed,
