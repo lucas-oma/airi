@@ -51,11 +51,23 @@ export function createApp() {
   })
 
   // Test authentication endpoint
-  app.get('/api/test-auth', authenticateApiKey, (req, res) => {
+  app.get('/api/test-conn', authenticateApiKey, (req, res) => {
     res.json({
       status: 'authenticated',
       timestamp: new Date().toISOString(),
       message: 'API key is valid',
+    })
+  })
+  // Get current database URL from environment
+  app.get('/api/database-url', authenticateApiKey, (req, res) => {
+    const dbUrl = env.DATABASE_URL || 'ERROR: DATABASE_URL environment variable not configured'
+
+    // Censor the password in the URL for security
+    const censoredUrl = dbUrl.replace(/:([^:@]+)@/, ':*****@')
+
+    res.json({
+      dbUrl: censoredUrl,
+      message: 'Database connection is configured via DATABASE_URL environment variable',
     })
   })
 

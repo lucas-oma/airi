@@ -24,6 +24,7 @@ import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic
 // Import API server
 import { createApp } from './api/server.js'
 import { BackgroundTrigger } from './services/background-trigger.js'
+import { EmbeddingProviderFactory } from './services/embedding-providers/factory.js'
 import { MemoryService } from './services/memory.js'
 import { MessageIngestionService } from './services/message-processing.js'
 
@@ -52,6 +53,20 @@ async function main() {
   })
 
   sdk.start()
+
+  // TODO [lucas-oma]: Initialize database connection
+  // await initDb()
+
+  // Initialize embedding provider at startup (prevents first-request delays)
+  try {
+    console.warn('🚀 Initializing embedding provider...')
+    const embeddingFactory = EmbeddingProviderFactory.getInstance()
+    await embeddingFactory.initializeProvider()
+  }
+  catch (error) {
+    console.error('Embedding provider initialization failed:', error)
+    // Don't exit - service can still work without embeddings
+  }
 
   // Get shared message ingestion service singleton
   const messageIngestionService = MessageIngestionService.getInstance()

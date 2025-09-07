@@ -16,6 +16,28 @@ export class EmbeddingProviderFactory {
     return EmbeddingProviderFactory.instance
   }
 
+  /**
+   * Initialize the embedding provider at startup
+   * This prevents delays on first user interaction
+   */
+  async initializeProvider(): Promise<void> {
+    try {
+      const settings = await this.settingsService.getSettings()
+
+      // Only initialize if we have API keys configured
+      if (settings.mem_embedding_api_key) {
+        await this.getProvider()
+      }
+      else {
+        throw new Error('Embedding provider not initialized: some settings are not configured')
+      }
+    }
+    catch (error) {
+      console.error('Failed to initialize embedding provider at startup:', error)
+      // Don't throw - we want the service to start even if embedding init fails
+    }
+  }
+
   private async getProvider() {
     const settings = await this.settingsService.getSettings()
     const provider = settings.mem_embedding_provider.toLowerCase()
@@ -62,6 +84,7 @@ export class EmbeddingProviderFactory {
     content_vector_1024: number[] | null
     content_vector_768: number[] | null
   }> {
+    // TODO [lucas-oma]: debug, this might be triggered twiced per message
     const settings = await this.settingsService.getSettings()
     const provider = await this.getProvider()
 

@@ -15,6 +15,10 @@ const connectionMessage = ref('')
 const connectionMessageType = ref<'success' | 'error'>('')
 const connectionError = ref('')
 
+// === DATABASE CONNECTION INFO ===
+const currentDbUrl = ref('')
+const dbInfoMessage = ref('')
+
 // === REGENERATION STATUS ===
 const isRegenerating = ref(false)
 const regenerationProgress = ref(0)
@@ -248,7 +252,7 @@ async function testConnection() {
       headers.Authorization = `Bearer ${apiKey.value}`
     }
 
-    const response = await fetch(`${memoryServiceUrl.value}/api/test-auth`, {
+    const response = await fetch(`${memoryServiceUrl.value}/api/test-conn`, {
       method: 'GET',
       headers,
     })
@@ -259,6 +263,9 @@ async function testConnection() {
       connectionMessage.value = 'Successfully connected with API key!'
       connectionMessageType.value = 'success'
       connectionError.value = ''
+
+      // Also fetch database info now that we have a working connection
+      await fetchDatabaseInfo()
     }
     else if (response.status === 401) {
       isConnected.value = false
@@ -380,20 +387,52 @@ function dismissRegenerationWarning() {
   settingsChanged.value = false
 }
 
+async function fetchDatabaseInfo() {
+  try {
+    if (!memoryServiceEnabled.value)
+      return
+
+    const response = await fetch(`${memoryServiceUrl.value}/api/database-url`, {
+      headers: {
+        Authorization: `Bearer ${apiKey.value}`,
+      },
+    })
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch database info')
+    }
+
+    const { dbUrl, message } = await response.json()
+    currentDbUrl.value = dbUrl
+    dbInfoMessage.value = message
+  }
+  catch (error) {
+    console.error('Failed to fetch database info:', error)
+    currentDbUrl.value = 'Unable to fetch database info'
+    dbInfoMessage.value = 'Error connecting to memory service'
+  }
+}
+
 // Watch for memory service being enabled
 watch(memoryServiceEnabled, async (newValue) => {
   if (newValue) {
     await fetchSettings()
     await fetchRegenerationStatus()
+    await fetchDatabaseInfo()
   }
 })
 
-onMounted(() => {
+onMounted(async () => {
   // Initialize temporary settings with either stored values or defaults
   tempEmbeddingProvider.value = embeddingProvider.value || 'openai'
   tempEmbeddingModel.value = embeddingModel.value || 'text-embedding-3-small'
   tempEmbeddingApiKey.value = embeddingApiKey.value
   tempEmbeddingDim.value = embeddingDim.value || 1536
+
+  // Fetch database info when settings page opens
+  if (memoryServiceEnabled.value) {
+    await fetchDatabaseInfo()
+  }
 
   // Force check for changes on mount
   const hasChanges
@@ -496,88 +535,122 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- Service Configuration Section -->
-    <div class="border border-neutral-200 rounded-lg bg-white p-6 dark:border-neutral-700 dark:bg-neutral-800">
-      <div class="mb-4">
-        <h3 class="text-lg text-neutral-900 font-semibold dark:text-neutral-100">
-          Service Configuration
-        </h3>
-        <p class="text-sm text-neutral-600 dark:text-neutral-400">
-          Configure the memory service connection and authentication
-        </p>
-      </div>
+    <!-- Service and Database Configuration Section - Two separate blocks side by side -->
+    <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
+      <!-- Service Configuration Block -->
+      <div class="border border-neutral-200 rounded-lg bg-white p-6 dark:border-neutral-700 dark:bg-neutral-800">
+        <div class="mb-4">
+          <h3 class="text-lg text-neutral-900 font-semibold dark:text-neutral-100">
+            Service Configuration
+          </h3>
+          <p class="text-sm text-neutral-600 dark:text-neutral-400">
+            Configure the memory service connection and authentication
+          </p>
+        </div>
 
-      <div class="mb-4">
-        <label class="flex cursor-pointer items-center gap-3">
-          <input
-            v-model="memoryServiceEnabled"
-            type="checkbox"
-            class="h-4 w-4 border-gray-300 rounded bg-gray-100 text-blue-600 dark:border-gray-600 dark:bg-gray-700 focus:ring-2 focus:ring-blue-500 dark:ring-offset-gray-800 dark:focus:ring-blue-600"
+        <div class="mb-4">
+          <label class="flex cursor-pointer items-center gap-3">
+            <input
+              v-model="memoryServiceEnabled"
+              type="checkbox"
+              class="h-4 w-4 border-gray-300 rounded bg-gray-100 text-blue-600 dark:border-gray-600 dark:bg-gray-700 focus:ring-2 focus:ring-blue-500 dark:ring-offset-gray-800 dark:focus:ring-blue-600"
+            >
+            <span class="text-sm text-neutral-700 font-medium dark:text-neutral-300">
+              Enable Memory Service Integration
+            </span>
+          </label>
+          <p class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+            When enabled, all chat messages and AI responses will be automatically stored in the memory service
+          </p>
+        </div>
+
+        <div class="mb-4">
+          <label class="mb-2 block text-sm text-neutral-700 font-medium dark:text-neutral-300">
+            Memory Service URL (default: http://localhost:3001)
+          </label>
+          <FieldInput
+            v-model="memoryServiceUrl"
+            placeholder="http://localhost:3001"
+            class="w-full"
+            :disabled="!memoryServiceEnabled"
+          />
+          <p class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+            The URL where your memory service is running
+          </p>
+        </div>
+
+        <div class="mb-4">
+          <label class="mb-2 block text-sm text-neutral-700 font-medium dark:text-neutral-300">
+            Server Password (Optional)
+          </label>
+          <FieldInput
+            v-model="apiKey"
+            type="password"
+            placeholder="Enter server password if authentication is required"
+            class="w-full"
+            :disabled="!memoryServiceEnabled"
+          />
+          <p class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+            Leave empty if no authentication is required
+          </p>
+        </div>
+
+        <div class="flex gap-2">
+          <button
+            class="w-full rounded-lg bg-neutral-200 px-4 py-2 transition-colors sm:w-auto disabled:cursor-not-allowed dark:bg-neutral-700 hover:bg-neutral-300 disabled:opacity-50 dark:hover:bg-neutral-600"
+            :disabled="!memoryServiceEnabled || isTesting"
+            @click="testConnection"
           >
-          <span class="text-sm text-neutral-700 font-medium dark:text-neutral-300">
-            Enable Memory Service Integration
-          </span>
-        </label>
-        <p class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-          When enabled, all chat messages and AI responses will be automatically stored in the memory service
-        </p>
+            {{ isTesting ? 'Testing...' : 'Test Connection' }}
+          </button>
+
+          <button
+            class="w-full border border-neutral-300 rounded-lg px-4 py-2 transition-colors sm:w-auto disabled:cursor-not-allowed dark:border-neutral-600 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-700"
+            :disabled="!memoryServiceEnabled"
+            @click="resetSettings"
+          >
+            Reset to Defaults
+          </button>
+        </div>
+
+        <div v-if="connectionMessage" class="mt-2 text-sm" :class="connectionMessageType === 'success' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'">
+          {{ connectionMessage }}
+        </div>
+
+        <div v-if="connectionError" class="mt-2 text-sm text-red-600 dark:text-red-400">
+          {{ connectionError }}
+        </div>
       </div>
 
-      <div class="mb-4">
-        <label class="mb-2 block text-sm text-neutral-700 font-medium dark:text-neutral-300">
-          Memory Service URL
-        </label>
-        <FieldInput
-          v-model="memoryServiceUrl"
-          placeholder="http://localhost:3001"
-          class="w-full"
-          :disabled="!memoryServiceEnabled"
-        />
-        <p class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-          The URL where your memory service is running
-        </p>
-      </div>
+      <!-- Database Connection Info -->
+      <div class="border border-neutral-200 rounded-lg bg-white p-6 dark:border-neutral-700 dark:bg-neutral-800">
+        <div class="mb-4">
+          <h3 class="text-lg text-neutral-900 font-semibold dark:text-neutral-100">
+            Database Connection
+          </h3>
+          <p class="text-sm text-neutral-600 dark:text-neutral-400">
+            Current database connection information
+          </p>
+        </div>
 
-      <div class="mb-4">
-        <label class="mb-2 block text-sm text-neutral-700 font-medium dark:text-neutral-300">
-          Server Password (Optional)
-        </label>
-        <FieldInput
-          v-model="apiKey"
-          type="password"
-          placeholder="Enter server password if authentication is required"
-          class="w-full"
-          :disabled="!memoryServiceEnabled"
-        />
-        <p class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-          Leave empty if no authentication is required
-        </p>
-      </div>
-
-      <div class="flex gap-2">
-        <button
-          class="w-full rounded-lg bg-neutral-200 px-4 py-2 transition-colors sm:w-auto disabled:cursor-not-allowed dark:bg-neutral-700 hover:bg-neutral-300 disabled:opacity-50 dark:hover:bg-neutral-600"
-          :disabled="!memoryServiceEnabled || isTesting"
-          @click="testConnection"
-        >
-          {{ isTesting ? 'Testing...' : 'Test Connection' }}
-        </button>
-
-        <button
-          class="w-full border border-neutral-300 rounded-lg px-4 py-2 transition-colors sm:w-auto disabled:cursor-not-allowed dark:border-neutral-600 hover:bg-neutral-100 disabled:opacity-50 dark:hover:bg-neutral-700"
-          :disabled="!memoryServiceEnabled"
-          @click="resetSettings"
-        >
-          Reset to Defaults
-        </button>
-      </div>
-
-      <div v-if="connectionMessage" class="mt-2 text-sm" :class="connectionMessageType === 'success' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'">
-        {{ connectionMessage }}
-      </div>
-
-      <div v-if="connectionError" class="mt-2 text-sm text-red-600 dark:text-red-400">
-        {{ connectionError }}
+        <div class="mb-4">
+          <label class="mb-2 block text-sm text-neutral-700 font-medium dark:text-neutral-300">
+            Current Database URL
+          </label>
+          <div class="rounded-md bg-neutral-50 p-3 dark:bg-neutral-700">
+            <code class="break-all text-sm text-neutral-800 dark:text-neutral-200">
+              {{ currentDbUrl || 'Loading...' }}
+            </code>
+          </div>
+          <p class="mt-2 text-sm text-neutral-600 dark:text-neutral-400">
+            {{ dbInfoMessage }}
+          </p>
+          <div class="mt-3 rounded-md bg-blue-50 p-3 dark:bg-blue-900/20">
+            <p class="text-sm text-blue-800 dark:text-blue-200">
+              <strong>Note:</strong> To change the database connection, update the <code>DATABASE_URL</code> environment variable in the memory service's <code>.env</code> file and restart the service.
+            </p>
+          </div>
+        </div>
       </div>
     </div>
 
