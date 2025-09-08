@@ -23,6 +23,11 @@ import { SettingsService } from '../services/settings'
 
 // Simple authentication middleware
 function authenticateApiKey(req: express.Request, res: express.Response, next: express.NextFunction) {
+  // If API_KEY is empty or not set, skip authentication entirely
+  if (!env.API_KEY || env.API_KEY === '') {
+    return next()
+  }
+
   const authHeader = req.headers.authorization
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'API key required' })
